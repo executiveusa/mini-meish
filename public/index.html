@@ -1,0 +1,1043 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no"/>
+<title>Meish's Defense Dashboard</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🛡️</text></svg>"/>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700;9..40,800&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+html{-webkit-text-size-adjust:100%}
+body{background:#080810;color:#e2e8f0;font-family:'DM Sans','Segoe UI',sans-serif;min-height:100vh;-webkit-font-smoothing:antialiased}
+::-webkit-scrollbar{width:4px}::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.08);border-radius:2px}
+textarea,input,select{font-family:inherit;color-scheme:dark}
+@keyframes fadeUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.35}}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes glow{0%,100%{box-shadow:0 0 8px rgba(99,102,241,0.3)}50%{box-shadow:0 0 20px rgba(99,102,241,0.6)}}
+.fade{animation:fadeUp 0.22s ease}
+.pulse{animation:pulse 2.2s ease-in-out infinite}
+.spin{animation:spin 0.8s linear infinite}
+.glow{animation:glow 3s ease-in-out infinite}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const {useState,useEffect,useCallback,useRef} = React;
+
+/* ═══════════════════════════════════════════════════════════════════
+   API — Cloudflare Worker / D1 with localStorage fallback
+═══════════════════════════════════════════════════════════════════ */
+const IS_FILE = window.location.protocol === 'file:';
+const API_BASE = IS_FILE ? null : '';
+
+function lsGet(k,d){try{const v=localStorage.getItem('mm_'+k);return v?JSON.parse(v):d}catch{return d}}
+function lsSet(k,v){try{localStorage.setItem('mm_'+k,JSON.stringify(v))}catch{}}
+
+async function apiGet(path){
+  if(!API_BASE && API_BASE!=='') return null;
+  try{const r=await fetch(API_BASE+path);if(!r.ok)return null;return await r.json()}catch{return null}
+}
+async function apiPost(path,body){
+  if(!API_BASE && API_BASE!=='') return null;
+  try{const r=await fetch(API_BASE+path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});if(!r.ok)return null;return await r.json()}catch{return null}
+}
+async function apiDel(path){
+  if(!API_BASE && API_BASE!=='') return null;
+  try{const r=await fetch(API_BASE+path,{method:'DELETE'});return await r.json()}catch{return null}
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   STATIC SEED DATA
+═══════════════════════════════════════════════════════════════════ */
+const CASE_DEFS=[
+  {id:"oc1",county:"Orange County",caseNum:"20HF0615",charges:["PC 29800(A)(1)"],bond:200000,color:"#f97316"},
+  {id:"oc2",county:"Orange County",caseNum:"— (confirm with clerk)",charges:["HS 11377(a)","VC 14601.1(A)"],bond:25000,color:"#f97316"},
+  {id:"sd1",county:"San Diego",caseNum:"— (confirm with clerk)",charges:["VC 2000.2(A)"],bond:50000,color:"#38bdf8"},
+  {id:"sd2",county:"San Diego",caseNum:"— (confirm with clerk)",charges:["VC 23152(a)"],bond:50000,color:"#38bdf8"},
+  {id:"sb1",county:"San Bernardino",caseNum:"FVI19002680",charges:["VC 23152(a)","VC 23152(b)"],bond:250000,color:"#a78bfa"},
+];
+
+const CONTACT_DEFS=[
+  {id:"ct1",name:"Lori Valdes",org:"Bail Hotline – Investigator",phone:"(951) 335-0704",email:"lvaldesa@bailhotline.net",notes:"Reference: FCS50-3037406. Email sent Jan 21 re: active warrant and $575K claim.",filled:true},
+  {id:"ct2",name:"Bail Hotline Bail Bonds – Main",org:"Bail Agency",phone:"(951) 683-9685",email:"",notes:"3230 Vine St. STE 200, Riverside, CA 92507",filled:true},
+  {id:"ct3",name:"Financial Casualty & Surety, Inc.",org:"Surety",phone:"(877) 737-2245",email:"",notes:"3131 Eastside St, Suite 250, Houston TX 77098. Contact if bail agency unreachable.",filled:true},
+  {id:"ct4",name:"Kazuyoshi Kubota",org:"Bail Agent – Bail Hotline",phone:"",email:"",notes:"Agent on all documents signed 09/26/2025.",filled:false},
+  {id:"ct5",name:"California Dept. of Insurance",org:"State Regulator",phone:"(800) 927-4357",email:"",notes:"300 Capitol Mall, 17th Floor, Sacramento CA 95814. Website: insurance.ca.gov",filled:true},
+  {id:"ct6",name:"San Diego Superior Court – Bail/Forfeiture",org:"Court Clerk",phone:"(619) 844-2000 / (619) 844-2161 (verify)",email:"",notes:"Website: sdcourt.ca.gov",filled:true},
+  {id:"ct7",name:"Riverside Superior Court – Civil Filings",org:"Court Clerk",phone:"(760) 274-9790 (verify division)",email:"",notes:"Website: riverside.courts.ca.gov — Venue clause: all lawsuits filed in Riverside County.",filled:true},
+  {id:"ct8",name:"Orange County Superior Court – Forfeiture Clerk",org:"Court Clerk",phone:"",email:"",notes:"Find phone at occourts.org — Case: 20HF0615. Fill in on first call.",filled:false},
+  {id:"ct9",name:"San Bernardino Superior Court – Forfeiture Clerk",org:"Court Clerk",phone:"",email:"",notes:"Find phone at sb-court.org — Case: FVI19002680. Fill in on first call.",filled:false},
+];
+
+const TASKS_DEF=[
+  {id:"t1",p:"P0",county:"San Diego",title:"Call San Diego Superior Court — confirm forfeiture, notice mailed date, case numbers",
+    script:"Hi, my name is [YOUR NAME]. I am calling regarding bail bond forfeiture for Jovontae Marquelle Hill. I am the indemnitor.\n\nCan you confirm:\n1) Whether Notice of Forfeiture was mailed and the date?\n2) Whether summary judgment was entered and the date?\n3) The case number(s) involved?\n4) Any upcoming deadlines?\n5) How can I obtain certified copies?\n\nMain Clerk: (619) 844-2000\nBail/Forfeiture Unit: (619) 844-2161 (verify first)\nWebsite: sdcourt.ca.gov",
+    checklist:["Asked: Was Notice of Forfeiture mailed? What date?","Asked: Was summary judgment entered? What date?","Asked: Case numbers for this defendant?","Asked: Any upcoming deadlines?","Asked: How to get certified copies?","Dates entered into Bond Timeline","Result logged in Logbook"]},
+  {id:"t2",p:"P0",county:"Orange County",title:"Call Orange County Superior Court — confirm forfeiture, notice mailed date, SJ status",
+    script:"Hi, my name is [YOUR NAME]. I am calling regarding bail bond case 20HF0615 for Jovontae Marquelle Hill. I am the indemnitor.\n\nCan you confirm:\n1) Whether Notice of Forfeiture was mailed and the date?\n2) Whether summary judgment was entered and the date?\n3) Any upcoming deadlines?\n4) How can I obtain certified copies?\n\nWebsite: occourts.org",
+    checklist:["Asked: Was Notice of Forfeiture mailed? What date?","Asked: Was summary judgment entered? What date?","Asked: Any upcoming deadlines?","Asked: How to get certified copies?","Dates entered into Bond Timeline","Result logged in Logbook"]},
+  {id:"t3",p:"P0",county:"San Bernardino",title:"Call San Bernardino Superior Court — confirm forfeiture, notice mailed date, SJ status",
+    script:"Hi, my name is [YOUR NAME]. I am calling regarding bail bond case FVI19002680 for Jovontae Marquelle Hill. I am the indemnitor.\n\nCan you confirm:\n1) Whether Notice of Forfeiture was mailed and the date?\n2) Whether summary judgment was entered and the date?\n3) Any upcoming deadlines?\n4) How can I obtain certified copies?\n\nWebsite: sb-court.org",
+    checklist:["Asked: Was Notice of Forfeiture mailed? What date?","Asked: Was summary judgment entered? What date?","Asked: Any upcoming deadlines?","Asked: How to get certified copies?","Dates entered into Bond Timeline","Result logged in Logbook"]},
+  {id:"t4",p:"P0",county:"Riverside",title:"Call Riverside Superior Court — check if civil lawsuit already filed against you",
+    script:"Hello, I am calling to check whether any civil lawsuit has been filed under my name related to a bail bond indemnity matter.\nDefendant: Jovontae Marquelle Hill.\n\nIf so, please provide case number and filing date.\n\nPhone: (760) 274-9790 (verify division)\nWebsite: riverside.courts.ca.gov\n\nWHY RIVERSIDE: The bail bond contract (Item 15, Venue Clause) states all legal action must be filed in Riverside County, California. This is where a lawsuit against you would be filed first.",
+    checklist:["Called Riverside civil filings clerk","Confirmed whether any case filed under my name","If filed: got case number and filing date","Result logged in Logbook"]},
+  {id:"t5",p:"P1",county:"All Courts",title:"Send formal document request to each court",
+    script:"Subject: Request for Bond Forfeiture Documents\n\nDear Clerk,\n\nI am requesting certified copies of:\n- Notice of Forfeiture and mailing date\n- Summary Judgment entry (if any)\n- Corresponding case number(s)\n\nDefendant: Jovontae Marquelle Hill\nDate of Birth: 09/27/1992\n\nPlease advise how to obtain copies and associated fees.\n\nThank you,\n[Your Name]",
+    checklist:["Sent request to San Diego court","Sent request to Orange County court","Sent request to San Bernardino court","Set 3-business-day follow-up reminder","Logged in Logbook"]},
+  {id:"t6",p:"P1",county:"Riverside (weekly)",title:"WEEKLY: Check Riverside civil docket for filings under your name",
+    script:"Search the Riverside Superior Court civil docket online or call:\nPhone: (760) 274-9790 (verify division)\nWebsite: riverside.courts.ca.gov\n\nSearch for your full name every week.\nLog the result: found / not found.\nContinue weekly until situation is resolved.",
+    checklist:["Searched Riverside civil docket this week","Logged result (found or not found)"]},
+  {id:"t7",p:"P1",county:"California",title:"Contact 3 California bail forfeiture attorneys — ask for PC 1305/1306 procedural audit",
+    script:"\"I need a procedural audit of bail forfeiture timelines under California Penal Code 1305-1306 — specifically the notice mailing date and summary judgment timing. I am the indemnitor on a $575,000 bond package across multiple counties (Orange, San Diego, San Bernardino). I am looking for a flat-fee consultation if possible.\"\n\nAsk each attorney:\n1) Do you have experience with PC 1305-1306 notice timing and SJ deadlines?\n2) Do you offer a flat-fee procedural audit?\n3) Can you handle multiple counties in one engagement?\n4) What is your fee estimate?",
+    checklist:["Attorney 1 logged in Attorney Tracker","Attorney 2 logged in Attorney Tracker","Attorney 3 logged in Attorney Tracker","Best option selected or decision logged"]},
+  {id:"t8",p:"P2",county:"Arizona",title:"IF California judgment confirmed: contact Arizona attorney about homestead & foreign judgment",
+    script:"\"I need advice about a potential California civil judgment being domesticated in Arizona, and about Arizona homestead exemptions and lien exposure on real property I own here.\"\n\nOnly take this step AFTER confirming whether a California court has entered Summary Judgment.\nDo NOT transfer property before speaking with an attorney.",
+    checklist:["Confirmed whether California judgment exists first","Contacted Arizona attorney if applicable","Discussed homestead exemptions and lien exposure","Outcome logged"]},
+];
+
+const LEDGER_SEED=[
+  {id:"l1",type:"CLAIMED",amount:575000,note:"Total bond amount claimed by Lori Valdes (email Jan 21) and all bond documents signed 09/26/2025. Requires per-county verification."},
+  {id:"l2",type:"PREMIUM",amount:19515,note:"Premium paid — listed on Indemnitor/Guarantor Checklist and Plain Talk Contract, 09/26/2025. Fully earned and NON-REFUNDABLE."},
+  {id:"l3",type:"OTHER",amount:57500,note:"Amount shown on Surety Bail Bond Agreement as 'pay Second Party' — appears to be 10% of $575K. Requires clarification from bail agency."},
+];
+
+const REPORT=[
+  {id:"r1",icon:"\u{1F4CB}",title:"What Is Happening",body:"You co-signed a $575,000 bail bond for Jovontae Marquelle Hill through Bail Hotline Bail Bonds (agent: Kazuyoshi Kubota), backed by Financial Casualty & Surety, Inc.\n\nThe bond was signed on September 26, 2025.\n\nAccording to an email from Lori Valdes, Investigator at Bail Hotline (sent January 21 at 1:57 PM), Jovontae failed to appear in San Diego County Superior Court on November 26, 2025. A warrant has been issued for his arrest.\n\nAs a result, Bail Hotline is asserting that you are now liable for the full $575,000 bond.\n\nThe email states: \"If this situation isn't addressed immediately, our Legal Department is prepared to move forward with collections, including potential wage garnishment, which could have a direct and lasting impact on your credit and financial standing.\"\n\nThe bond covers five cases across four counties:\n\n\u2022 Orange County \u2014 Case 20HF0615 \u2014 $200,000 \u2014 Charge: PC 29800(A)(1)\n\u2022 Orange County \u2014 (no case number on document) \u2014 $25,000 \u2014 Charges: HS 11377(a), VC 14601.1(A)\n\u2022 San Diego \u2014 (no case number in documents) \u2014 $50,000 \u2014 Charge: VC 2000.2(A)\n\u2022 San Diego \u2014 (no case number in documents) \u2014 $50,000 \u2014 Charge: VC 23152(a)\n\u2022 San Bernardino \u2014 Case FVI19002680 \u2014 $250,000 \u2014 Charges: VC 23152(a), VC 23152(b)\n\nTotal: $575,000"},
+  {id:"r2",icon:"\u{1F4C4}",title:"What Your Signed Contract Says You Owe",body:"The Surety Bail Bond Agreement (FCS-110-CA) you signed with Bail Hotline Bail Bonds states the following obligations. These are direct quotes from your signed contract:\n\nFIRST: \"To pay Second Party $57,500.00 for this Bail Bond. The premium is fully earned upon the release of Principal.\"\n\nTHIRD: \"To reimburse Second Party and Surety for actual expenses incurred and caused by a breach by the Principal... including all expenses or liabilities incurred as a result of searching for, recapturing or returning Principal to custody... including legal fees incurred by Second Party or Surety in making application to a court for an order to vacate or to set aside the order of forfeiture or Summary Judgment entered thereon.\"\n\nFOURTH: \"To pay Second Party or Surety, in the event that it is necessary for them to institute a suit or collection, for a breach of this agreement, a reasonable attorney's fee or collection fees which shall, in no event, be less than the sum of twenty-five dollars ($25.00).\"\n\nSIXTH: \"To pay to the Second Party or the Surety immediately upon the declaration of forfeiture of said Bail Bond the penal amount thereof.\"\n\nItem 6 of the Indemnitor/Guarantor Checklist: \"I understand that if it becomes necessary to arrest and surrender the defendant, I am responsible for paying for investigation, location and apprehension time: this is billed at a minimum rate of $250 per hour per investigator plus expenses.\"\n\nItem 7: \"I understand that if the bail is ordered forfeited by the court, I am responsible to pay court costs and reasonable appearance fees (a minimum of $50) for the bail agency to reinstate or exonerate the bail bond if necessary.\"\n\nItem 15 (Venue Clause): \"I agree that if legal action between the parties concerning this bail bond is brought, it shall be brought in and before a federal or state court in Riverside County in the State of California.\"\n\nThe Satisfaction of Full Premium document lists:\n\u2022 Bail Amount: $575,000.00\n\u2022 Indemnitor: Meishael Smith\n\u2022 Email: MEISHAEL@YAHOO.COM\n\u2022 Phone: (407) 883-9277"},
+  {id:"r3",icon:"\u2696\uFE0F",title:"What Must Legally Happen Before You Owe $575,000",body:"This is the most important section. The bail company's demand does not automatically mean you owe $575,000 today. California law requires specific steps before the full bond amount can be enforced against you.\n\nHere is the procedural sequence under California Penal Code 1305-1306:\n\nStep 1 \u2014 Forfeiture Declaration\nThe court must formally declare the bond forfeited when the defendant fails to appear. This happens in open court and is entered in the minutes.\n\nStep 2 \u2014 Notice of Forfeiture Mailed\nAfter forfeiture is declared, the court clerk must mail a Notice of Forfeiture to the bail company (the surety) and the bail agent. The mailing date is critical \u2014 it starts the clock.\n\nStep 3 \u2014 The Appearance Period (185 Days)\nFrom the date the Notice of Forfeiture is mailed, there is typically a 180-day period (extended to 185 days with mailing time) during which the surety can move to have the forfeiture set aside \u2014 for example, if the defendant appears in court, is arrested, dies, or is deported.\n\nStep 4 \u2014 Summary Judgment\nIf the appearance period expires without resolution, the court may enter Summary Judgment against the surety for the full bond amount. Only after Summary Judgment does the surety's liability become a court judgment.\n\nStep 5 \u2014 Collection Against You as Indemnitor\nAfter Summary Judgment, the surety can seek to collect from you as the indemnitor. This is when wage garnishment or property liens become a real legal possibility.\n\nWhat this means for you right now:\nYou need to find out exactly where each bond is in this sequence. The bail company's email uses urgent language \u2014 but until you verify the court records, you do not know whether Summary Judgment has been entered, whether the appearance period is still open, or whether any procedural defects exist that could benefit you.\n\nDo not assume the worst. Do not assume the best. Verify."},
+  {id:"r4",icon:"\u{1F6A6}",title:"Immediate Do / Don\u2019t",body:"DO:\n\n\u2022 Keep all communication in writing or follow up calls with an email summary.\n\u2022 Request official, certified copies of every court notice and judgment.\n\u2022 Log every call \u2014 who you spoke with, what was said, date, and time.\n\u2022 Ask each court for the forfeiture date, notice mailed date, and summary judgment status.\n\u2022 Get everything in writing before making any payment.\n\u2022 Check the Bond Timeline page after every court call and fill in what you learned.\n\nDON\u2019T:\n\n\u2022 Do not transfer property or assets into another person's name or into a trust right now. This can appear fraudulent and may not protect you.\n\u2022 Do not sign any new payment agreements with the bail company without first understanding the court status and consulting an attorney.\n\u2022 Do not admit liability in writing or over the phone.\n\u2022 Do not share detailed information about your assets or finances with the bail company investigator.\n\u2022 Do not panic at the language in the email. \"Legal Department is prepared to move forward with collections\" is a pressure statement. Actual collection requires court action."},
+  {id:"r5",icon:"\u{1F4DE}",title:"Your Calls: What to Ask Each Court",body:"Call each court and ask these four questions. You are not explaining your situation. You are collecting procedural facts.\n\nThe four questions:\n1) Was forfeiture declared on the bond? On what date?\n2) When was the Notice of Forfeiture mailed?\n3) Has summary judgment been entered on the bond? If so, on what date?\n4) How can I obtain certified copies of the Notice of Forfeiture and the minute order?\n\nSan Diego Superior Court \u2014 Bail/Forfeiture Unit\n\u2022 Main Clerk: (619) 844-2000\n\u2022 Bail/Forfeiture Unit: (619) 844-2161 (verify this number)\n\u2022 Website: sdcourt.ca.gov\n\u2022 Note: Two bonds exist in San Diego. Case numbers are not in your documents \u2014 the clerk can look up by defendant name.\n\nRiverside Superior Court \u2014 Civil Filings\n\u2022 Phone: (760) 274-9790 (verify division)\n\u2022 Website: riverside.courts.ca.gov\n\u2022 What to ask: Has any civil lawsuit been filed under my name related to a bail bond indemnity matter? Defendant: Jovontae Marquelle Hill. If so, provide case number and filing date.\n\u2022 Why Riverside: The venue clause in your contract states all legal action must be filed in Riverside County.\n\nOrange County Superior Court \u2014 Bond/Forfeiture Clerk\n\u2022 Find the phone number at: occourts.org\n\u2022 Case number: 20HF0615\n\nSan Bernardino Superior Court \u2014 Bond/Forfeiture Clerk\n\u2022 Find the phone number at: sb-court.org\n\u2022 Case number: FVI19002680\n\nAfter each call:\n\u2022 Log who you spoke with, what was confirmed, and what was not confirmed.\n\u2022 Enter the dates you find into the Bond Timeline tab immediately.\n\u2022 If they ask you to submit a written request, use the document request template in the Tasks section.\n\u2022 If they cannot locate the case by name, have the defendant's date of birth ready: 09/27/1992."},
+  {id:"r6",icon:"\u{1F4C1}",title:"Documents to Request and Track",body:"You need to collect and store the following documents. This is your evidence.\n\nFrom each court:\n\u2022 Notice of Forfeiture \u2014 the official notice mailed to the bail company, with the mailing date visible\n\u2022 Minute order \u2014 the court's record of the FTA (Failure to Appear) and the forfeiture declaration\n\u2022 Summary Judgment entry \u2014 if one has been entered, this is the court's final judgment on the bond\n\u2022 Any extension or motion to vacate that has been filed\n\nDocuments you already have (from the bond packet):\n\u2022 Application and Agreement for Surety Bail Bond (FCS-106-CA) \u2014 signed 09/26/2025\n\u2022 Surety Bail Bond Agreement (FCS-110-CA) \u2014 signed 09/26/2025\n\u2022 Indemnitor/Guarantor Checklist (FCS-125) \u2014 signed 09/26/2025\n\u2022 Conditions of Release \u2014 signed 09/26/2025\n\u2022 Plain Talk Contract \u2014 signed 09/26/2025\n\u2022 Satisfaction of Full Premium \u2014 signed 09/26/2025\n\u2022 Supervised Bail Agreement \u2014 signed 09/26/2025\n\u2022 Bond Disclosure Statement (FCS-165-CA)\n\u2022 Email from Lori Valdes, dated January 21, re: active warrant and $575K claim\n\nDocument Request Template:\nSubject: Request for Bond Forfeiture Documents\n\nDear Clerk,\n\nI am requesting certified copies of:\n\u2022 Notice of Forfeiture and mailing date\n\u2022 Summary Judgment entry (if any)\n\u2022 Corresponding case number(s)\n\nDefendant: Jovontae Marquelle Hill\nDate of Birth: 09/27/1992\n\nPlease advise how to obtain copies and associated fees.\n\nThank you,\n[Your Name]"},
+  {id:"r7",icon:"\u{1F3E0}",title:"The Venue Clause and Arizona Property Risk",body:"The venue clause in your contract is important.\n\nItem 15 of the Indemnitor/Guarantor Checklist states:\n\"Agreement of Venue: I agree that if legal action between the parties concerning this bail bond is brought, it shall be brought in and before a federal or state court in Riverside County in the State of California.\"\n\nThe Satisfaction of Full Premium document also states:\n\"Any litigation arising out of this bail bond(s) shall take place in Riverside, California.\"\n\nWhat this means: If Bail Hotline or the surety sues you, they will most likely file in Riverside County, California. This is why you are calling Riverside Superior Court to check for civil filings \u2014 that is where a lawsuit would appear first.\n\nRegarding your Arizona property:\nYou own real property in Maricopa, Arizona (address listed on your bond application: 37125 W Prado St, Maricopa AZ 85138).\n\nIf a California civil judgment is entered against you, it can be \"domesticated\" in Arizona \u2014 meaning it can be registered with an Arizona court and enforced there. This could result in a lien on your property.\n\nThis does not happen automatically or immediately. It requires:\n1) A California court judgment (Summary Judgment on the bond)\n2) A legal action to domesticate the judgment in Arizona\n3) Arizona court proceedings\n\nRules for now:\n\u2022 Do not transfer the property into another name or trust before speaking with an Arizona attorney.\n\u2022 Do not encumber the property with new liens or mortgages.\n\u2022 If you are served with any legal papers, respond within the deadlines stated on the papers.\n\u2022 An Arizona attorney can advise you on homestead exemptions that may apply to your primary residence."},
+  {id:"r8",icon:"\u{1F4B0}",title:"Financial Tracking and Negotiation",body:"Known financial figures from your documents:\n\nBond amounts by case:\n\u2022 Orange County, Case 20HF0615: $200,000\n\u2022 Orange County (second case): $25,000\n\u2022 San Diego (first bond): $50,000\n\u2022 San Diego (second bond): $50,000\n\u2022 San Bernardino, Case FVI19002680: $250,000\n\u2022 Total: $575,000\n\nPremium paid:\n\u2022 $19,515 \u2014 listed on Indemnitor/Guarantor Checklist and Plain Talk Contract, dated 09/26/2025\n\u2022 This is fully earned and non-refundable once the defendant was released from custody.\n\nAmount shown on Surety Bail Bond Agreement:\n\u2022 $57,500 \u2014 listed as \"To pay Second Party.\" This appears to be the 10% premium calculation on $575,000. Requires clarification from bail agency.\n\nWhat Bail Hotline is claiming:\n\u2022 Full $575,000 bond amount (per Lori Valdes email, January 21)\n\nWhat you should track going forward:\n\u2022 Any settlement offer from Bail Hotline \u2014 log the amount, date, and who made the offer\n\u2022 Any payment demands in writing \u2014 log and do not sign without review\n\u2022 Any investigation costs billed to you \u2014 the contract allows $250/hour per investigator plus expenses, but this only applies after forfeiture\n\nRule: Do not agree to any payment plan or settlement without first knowing the Summary Judgment status and consulting with a California bail forfeiture attorney. A settlement may be possible, but the terms matter enormously."},
+  {id:"r9",icon:"\u{1F454}",title:"Lawyer Outreach: What Kind and What to Say",body:"You may need two types of attorneys depending on what the courts tell you.\n\n1) California bail forfeiture attorney (most urgent if SJ has not been entered)\n\nWhat to look for:\n\u2022 Experience specifically with California Penal Code 1305-1306\n\u2022 Motion practice on bail forfeiture timelines and notice defects\n\u2022 Experience in Orange County, San Diego, and/or San Bernardino courts\n\nWhat to say:\n\"I need a procedural audit of bail forfeiture timelines on a $575,000 bond package across multiple California counties \u2014 Orange County, San Diego, and San Bernardino. I need to know if the Notice of Forfeiture was properly mailed, whether summary judgment has been entered, and whether there are any procedural defects. I am looking for a flat-fee consultation if possible.\"\n\nWhat to ask:\n\u2022 Do you handle PC 1305-1306 bail forfeiture defense?\n\u2022 What is your experience with notice timing defects?\n\u2022 Do you offer a flat-fee procedural audit?\n\u2022 Can you cover multiple counties in one engagement?\n\nImportant: Do not hire anyone based only on a phone call. Get a written scope and fee agreement.\n\n2) Arizona attorney (only if a California judgment is confirmed)\n\nWhat to ask:\n\u2022 Can you advise on domesticating a California judgment in Arizona?\n\u2022 What are my homestead exemption rights on my primary residence?\n\u2022 What is my lien exposure on the property at 37125 W Prado St, Maricopa AZ 85138?\n\u2022 What are my options if a lien is placed?\n\nImportant: Log every attorney in the Attorney Tracker tab. Do not hire anyone without a written scope and fee agreement."},
+  {id:"r10",icon:"\u{1F465}",title:"Everyone Involved and Their Roles",body:"From the bond documents:\n\nDefendant: Jovontae Marquelle Hill\n\u2022 Date of Birth: 09/27/1992\n\u2022 Height: 5'8\" | Weight: 185 | Hair: Black | Eyes: Brown\n\u2022 Where Born: San Diego, CA\n\nIndemnitor (you \u2014 Meishael Smith):\n\u2022 Address: 37125 W Prado St, Maricopa AZ 85138\n\u2022 Phone: (602) 575-0536\n\u2022 DOB: 05/11/1987\n\u2022 Occupation: CNA / Owner\n\u2022 Monthly Income: $5,000.00\n\u2022 Relationship to defendant: Girlfriend\n\u2022 Email: MEISHAEL@YAHOO.COM\n\nBail Agent: Kazuyoshi Kubota\nBail Agency: Bail Hotline Bail Bonds\n\u2022 Address: 3230 Vine St. STE 200, Riverside, CA 92507\n\u2022 Phone: (951) 683-9685\n\nSurety: Financial Casualty & Surety, Inc.\n\u2022 Address: 3131 Eastside Street, Suite 250, Houston, Texas 77098\n\u2022 Phone: (877) 737-2245\n\nBail Hotline Investigator: Lori Valdes\n\u2022 Phone: (951) 335-0704\n\u2022 Email: lvaldesa@bailhotline.net\n\u2022 File Reference: FCS50-3037406\n\nNote: This information comes from the bail bond application you signed. Keep this document private."},
+];
+
+/* ═══════════════════════════════════════════════════════════════════
+   HELPERS
+═══════════════════════════════════════════════════════════════════ */
+const fmt=n=>"$"+Number(n).toLocaleString();
+function addDays(ds,d){if(!ds)return null;const dt=new Date(ds+'T12:00:00');dt.setDate(dt.getDate()+d);return dt}
+function daysUntil(d){if(!d)return null;const n=new Date();n.setHours(0,0,0,0);const t=new Date(d);t.setHours(0,0,0,0);return Math.round((t-n)/864e5)}
+function fmtDate(d){if(!d)return'\u2014';const dt=typeof d==='string'?new Date(d+(d.includes('T')?'':'T12:00:00')):d;return dt.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})}
+
+/* ═══════════════════════════════════════════════════════════════════
+   UI COMPONENTS
+═══════════════════════════════════════════════════════════════════ */
+const Pill=({label,color="#6366f1"})=>(
+  <span style={{background:color+"25",color,border:"1px solid "+color+"44",borderRadius:5,padding:"2px 8px",fontSize:11,fontWeight:700,letterSpacing:"0.04em",display:"inline-block",whiteSpace:"nowrap"}}>{label}</span>
+);
+
+const Btn=({children,onClick,variant="primary",style:sx={},disabled=false})=>{
+  const styles={
+    primary:{background:"linear-gradient(135deg,#6366f1,#7c3aed)",color:"#fff",boxShadow:"0 2px 14px #6366f133"},
+    ghost:{background:"rgba(255,255,255,0.05)",color:"#94a3b8",border:"1px solid rgba(255,255,255,0.08)"},
+    danger:{background:"rgba(239,68,68,0.15)",color:"#fca5a5",border:"1px solid rgba(239,68,68,0.2)"},
+    green:{background:"rgba(74,222,128,0.12)",color:"#4ade80",border:"1px solid rgba(74,222,128,0.25)"},
+  };
+  return <button onClick={onClick} disabled={disabled} style={{fontFamily:"inherit",cursor:disabled?"not-allowed":"pointer",borderRadius:9,border:"none",fontWeight:700,fontSize:13,padding:"10px 18px",transition:"all 0.18s",display:"inline-flex",alignItems:"center",gap:6,opacity:disabled?0.5:1,...styles[variant],...sx}}>{children}</button>;
+};
+
+const Card=({children,style:sx={},onClick,highlight,danger})=>(
+  <div onClick={onClick} style={{background:danger?"rgba(239,68,68,0.04)":highlight?"rgba(99,102,241,0.07)":"rgba(255,255,255,0.03)",border:"1px solid "+(danger?"rgba(239,68,68,0.25)":highlight?"rgba(99,102,241,0.3)":"rgba(255,255,255,0.07)"),borderRadius:14,padding:"18px 22px",cursor:onClick?"pointer":"default",transition:"all 0.18s",...sx}}>{children}</div>
+);
+
+const Bar=({pct,color="#6366f1"})=>(
+  <div style={{background:"rgba(255,255,255,0.07)",borderRadius:99,height:5,overflow:"hidden"}}>
+    <div style={{width:Math.min(100,Math.max(0,pct))+"%",height:"100%",background:color,borderRadius:99,transition:"width 0.5s ease"}}/>
+  </div>
+);
+
+const CopyBtn=({text})=>{
+  const[ok,setOk]=useState(false);
+  return <button onClick={()=>{navigator.clipboard&&navigator.clipboard.writeText(text);setOk(true);setTimeout(()=>setOk(false),2000)}}
+    style={{fontFamily:"inherit",display:"inline-flex",alignItems:"center",gap:5,background:ok?"rgba(74,222,128,0.1)":"rgba(99,102,241,0.15)",border:"1px solid "+(ok?"rgba(74,222,128,0.3)":"rgba(99,102,241,0.3)"),borderRadius:7,padding:"5px 11px",color:ok?"#4ade80":"#818cf8",fontSize:12,cursor:"pointer",fontWeight:600}}>{ok?"\u2713 Copied":"\u2398 Copy"}</button>;
+};
+
+const Divider=()=><div style={{height:1,background:"rgba(255,255,255,0.06)",margin:"12px 0"}}/>;
+const Spinner=()=><div className="spin" style={{width:18,height:18,border:"2px solid rgba(99,102,241,0.3)",borderTopColor:"#6366f1",borderRadius:"50%",display:"inline-block"}}/>;
+
+const SyncBadge=({syncing,lastSync})=>(
+  <div style={{display:"flex",alignItems:"center",gap:6,fontSize:11,color:"#4b5563"}}>
+    {syncing?<><Spinner/><span style={{color:"#818cf8"}}>Saving\u2026</span></>:<><span style={{color:"#4ade80"}}>\u25CF</span><span>Synced{lastSync?" "+new Date(lastSync).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}):""}</span></>}
+  </div>
+);
+
+/* ═══════════════════════════════════════════════════════════════════
+   NAV
+═══════════════════════════════════════════════════════════════════ */
+const NAV=[
+  {id:"dash",label:"Home",icon:"\u{1F3E0}"},
+  {id:"timeline",label:"Timeline",icon:"\u23F1"},
+  {id:"report",label:"Report",icon:"\u{1F4D6}"},
+  {id:"tasks",label:"Tasks",icon:"\u2705"},
+  {id:"attorneys",label:"Attorneys",icon:"\u{1F454}"},
+  {id:"cases",label:"Cases",icon:"\u{1F4C2}"},
+  {id:"contacts",label:"Contacts",icon:"\u{1F4DE}"},
+  {id:"logbook",label:"Logbook",icon:"\u{1F4CB}"},
+  {id:"finance",label:"Finances",icon:"\u{1F4B2}"},
+];
+
+/* ═══════════════════════════════════════════════════════════════════
+   APP ROOT
+═══════════════════════════════════════════════════════════════════ */
+function App(){
+  const[page,setPage]=useState("dash");
+  const[menuOpen,setMenuOpen]=useState(false);
+  const[loading,setLoading]=useState(true);
+  const[syncing,setSyncing]=useState(false);
+  const[lastSync,setLastSync]=useState(null);
+  const[useD1,setUseD1]=useState(false);
+
+  const[tasks,setTasksRaw]=useState(TASKS_DEF.map(t=>({...t,done:false})));
+  const[taskChecks,setTaskChecksRaw]=useState({});
+  const[contacts,setContactsRaw]=useState(CONTACT_DEFS);
+  const[bondFacts,setBondFactsRaw]=useState({});
+  const[logs,setLogs]=useState([]);
+  const[ledger,setLedger]=useState(LEDGER_SEED);
+  const[attorneys,setAttorneys]=useState([]);
+  const[reportSec,setReportSec]=useState(null);
+
+  const syncTimer=useRef(null);
+
+  // ── LOAD ────────────────────────────────────────────────────────
+  useEffect(()=>{
+    (async()=>{
+      setLoading(true);
+      // Try D1 first
+      const stateData=await apiGet('/api/state');
+      if(stateData && typeof stateData==='object' && !stateData.error){
+        setUseD1(true);
+        if(stateData.tasks) setTasksRaw(stateData.tasks);
+        if(stateData.taskChecks) setTaskChecksRaw(stateData.taskChecks);
+        if(stateData.contacts) setContactsRaw(stateData.contacts);
+        if(stateData.bondFacts) setBondFactsRaw(stateData.bondFacts);
+        const logsData=await apiGet('/api/logs');
+        if(logsData) setLogs(logsData);
+        const ledgerData=await apiGet('/api/ledger');
+        if(ledgerData&&ledgerData.length>0) setLedger(ledgerData);
+        else{for(const e of LEDGER_SEED) await apiPost('/api/ledger',e);const f=await apiGet('/api/ledger');if(f&&f.length>0)setLedger(f)}
+        const attData=await apiGet('/api/attorneys');
+        if(attData) setAttorneys(attData);
+        setLastSync(new Date());
+      } else {
+        // Fallback to localStorage
+        setUseD1(false);
+        const ls=lsGet('state',{});
+        if(ls.tasks) setTasksRaw(ls.tasks);
+        if(ls.taskChecks) setTaskChecksRaw(ls.taskChecks);
+        if(ls.contacts) setContactsRaw(ls.contacts);
+        if(ls.bondFacts) setBondFactsRaw(ls.bondFacts);
+        setLogs(lsGet('logs',[]));
+        setLedger(lsGet('ledger',LEDGER_SEED));
+        setAttorneys(lsGet('attorneys',[]));
+        setLastSync(new Date());
+      }
+      setLoading(false);
+    })();
+  },[]);
+
+  // ── SAVE STATE (debounced) ──────────────────────────────────────
+  const saveState=useCallback((patch)=>{
+    setSyncing(true);
+    if(syncTimer.current) clearTimeout(syncTimer.current);
+    syncTimer.current=setTimeout(async()=>{
+      if(useD1){
+        await apiPost('/api/state',patch);
+      } else {
+        const cur=lsGet('state',{});
+        lsSet('state',{...cur,...patch});
+      }
+      setLastSync(new Date());
+      setSyncing(false);
+    },600);
+  },[useD1]);
+
+  const setTasks=u=>{setTasksRaw(p=>{const n=typeof u==='function'?u(p):u;saveState({tasks:n});return n})};
+  const setTaskChecks=u=>{setTaskChecksRaw(p=>{const n=typeof u==='function'?u(p):u;saveState({taskChecks:n});return n})};
+  const setContacts=u=>{setContactsRaw(p=>{const n=typeof u==='function'?u(p):u;saveState({contacts:n});return n})};
+  const setBondFacts=u=>{setBondFactsRaw(p=>{const n=typeof u==='function'?u(p):u;saveState({bondFacts:n});return n})};
+
+  const addLog=async(entry)=>{
+    const id=String(Date.now());
+    const full={id,at:new Date().toISOString(),...entry};
+    if(useD1) await apiPost('/api/logs',full);
+    setLogs(p=>{const n=[full,...p];if(!useD1)lsSet('logs',n);return n});
+  };
+  const delLog=async(id)=>{
+    if(useD1) await apiDel('/api/logs/'+id);
+    setLogs(p=>{const n=p.filter(l=>l.id!==id);if(!useD1)lsSet('logs',n);return n});
+  };
+  const addLedger=async(entry)=>{
+    const id=String(Date.now());
+    const full={id,...entry};
+    if(useD1){await apiPost('/api/ledger',full);const f=await apiGet('/api/ledger');if(f)setLedger(f)}
+    else setLedger(p=>{const n=[...p,full];lsSet('ledger',n);return n});
+  };
+  const delLedger=async(id)=>{
+    if(useD1) await apiDel('/api/ledger/'+id);
+    setLedger(p=>{const n=p.filter(l=>l.id!==id);if(!useD1)lsSet('ledger',n);return n});
+  };
+  const saveAttorney=async(att)=>{
+    if(useD1){await apiPost('/api/attorneys',att);const f=await apiGet('/api/attorneys');if(f)setAttorneys(f)}
+    else setAttorneys(p=>{const existing=p.findIndex(a=>a.id===att.id);const n=existing>=0?p.map(a=>a.id===att.id?att:a):[att,...p];lsSet('attorneys',n);return n});
+  };
+  const delAttorney=async(id)=>{
+    if(useD1) await apiDel('/api/attorneys/'+id);
+    setAttorneys(p=>{const n=p.filter(a=>a.id!==id);if(!useD1)lsSet('attorneys',n);return n});
+  };
+
+  const toggleTask=id=>setTasks(p=>p.map(t=>t.id===id?{...t,done:!t.done}:t));
+  const toggleCheck=(tid,i)=>{
+    const base=TASKS_DEF.find(t=>t.id===tid);
+    const curr=taskChecks[tid]||(base?base.checklist.map(()=>false):[]);
+    setTaskChecks(p=>({...p,[tid]:curr.map((v,j)=>j===i?!v:v)}));
+  };
+
+  const p0open=tasks.filter(t=>t.p==="P0"&&!t.done);
+  const donePct=Math.round((tasks.filter(t=>t.done).length/tasks.length)*100);
+
+  const urgentDeadlines=[];
+  for(const c of CASE_DEFS){
+    const f=bondFacts[c.id]||{};
+    if(f.noticeMailed){
+      const deadline=addDays(f.noticeMailed,185);
+      const days=daysUntil(deadline);
+      if(f.sjDate||f.sjStatus==='entered') continue;
+      if(days!==null&&days<=60) urgentDeadlines.push({county:c.county,caseId:c.id,deadline,days});
+    }
+  }
+
+  const go=id=>{setPage(id);setMenuOpen(false)};
+
+  const pages={dash:DashPage,timeline:TimelinePage,report:ReportPage,tasks:TasksPage,attorneys:AttorneyPage,cases:CasesPage,contacts:ContactsPage,logbook:LogbookPage,finance:FinancePage};
+  const Pg=pages[page]||DashPage;
+
+  if(loading) return(
+    <div style={{minHeight:"100vh",background:"#080810",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:16}}>
+      <div className="glow" style={{width:48,height:48,borderRadius:14,background:"linear-gradient(135deg,#4f46e5,#7c3aed)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:24}}>{"\u{1F6E1}\uFE0F"}</div>
+      <div style={{color:"#6b7280",fontSize:14}}>Loading your dashboard\u2026</div>
+    </div>
+  );
+
+  return(
+    <div style={{minHeight:"100vh",background:"#080810",color:"#e2e8f0",fontFamily:"'DM Sans','Segoe UI',sans-serif",display:"flex",flexDirection:"column"}}>
+      {/* HEADER */}
+      <header style={{background:"rgba(8,8,16,0.98)",borderBottom:"1px solid rgba(255,255,255,0.07)",padding:"0 16px",height:56,display:"flex",alignItems:"center",justifyContent:"space-between",position:"sticky",top:0,zIndex:200,backdropFilter:"blur(12px)"}}>
+        <div style={{display:"flex",alignItems:"center",gap:10}}>
+          <div style={{width:32,height:32,borderRadius:9,background:"linear-gradient(135deg,#4f46e5,#7c3aed)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:15,flexShrink:0}}>{"\u{1F6E1}\uFE0F"}</div>
+          <div>
+            <div style={{fontWeight:800,fontSize:14,color:"#e0e7ff"}}>Meish's Defense Dashboard</div>
+            <div style={{fontSize:10,color:"#374151",letterSpacing:"0.04em"}}>JOVONTAE \u00B7 $575K \u00B7 4 COUNTIES</div>
+          </div>
+        </div>
+        <div style={{display:"flex",alignItems:"center",gap:10}}>
+          <SyncBadge syncing={syncing} lastSync={lastSync}/>
+          {(p0open.length>0||urgentDeadlines.length>0)&&(
+            <div className="pulse" style={{background:"rgba(239,68,68,0.15)",border:"1px solid rgba(239,68,68,0.3)",borderRadius:20,padding:"4px 10px",fontSize:11,color:"#fca5a5",fontWeight:700}}>
+              {p0open.length+urgentDeadlines.length} urgent
+            </div>
+          )}
+          <button onClick={()=>setMenuOpen(v=>!v)} style={{background:"rgba(255,255,255,0.05)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:8,color:"#94a3b8",cursor:"pointer",padding:"6px 10px",fontSize:18,lineHeight:1}}>{"\u2630"}</button>
+        </div>
+      </header>
+
+      {/* SLIDE-OUT MENU */}
+      {menuOpen&&(
+        <div style={{position:"fixed",inset:0,zIndex:300,display:"flex"}}>
+          <div onClick={()=>setMenuOpen(false)} style={{flex:1,background:"rgba(0,0,0,0.7)"}}/>
+          <div style={{width:240,background:"#0d0d1a",borderLeft:"1px solid rgba(255,255,255,0.08)",padding:"20px 12px",display:"flex",flexDirection:"column",gap:4,overflowY:"auto"}}>
+            <div style={{fontWeight:800,color:"#6366f1",fontSize:11,padding:"0 8px 12px",letterSpacing:"0.1em",textTransform:"uppercase",borderBottom:"1px solid rgba(255,255,255,0.06)",marginBottom:8}}>Navigation</div>
+            {NAV.map(n=>(
+              <button key={n.id} onClick={()=>go(n.id)} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 12px",borderRadius:9,border:"none",cursor:"pointer",background:page===n.id?"rgba(99,102,241,0.18)":"transparent",color:page===n.id?"#a5b4fc":"#6b7280",fontWeight:page===n.id?700:400,fontSize:14,textAlign:"left"}}>
+                <span>{n.icon}</span>{n.label}
+              </button>
+            ))}
+            <Divider/>
+            <div style={{fontSize:11,color:"#374151",padding:"4px 12px"}}>
+              Storage: {useD1?<span style={{color:"#4ade80"}}>Cloud (D1)</span>:<span style={{color:"#fbbf24"}}>Local only</span>}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* BOTTOM TAB BAR */}
+      <div style={{position:"fixed",bottom:0,left:0,right:0,background:"rgba(8,8,16,0.97)",borderTop:"1px solid rgba(255,255,255,0.07)",display:"flex",zIndex:150,backdropFilter:"blur(12px)"}}>
+        {NAV.slice(0,6).map(n=>(
+          <button key={n.id} onClick={()=>go(n.id)} style={{flex:1,padding:"10px 2px 8px",border:"none",background:"transparent",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:2}}>
+            <span style={{fontSize:16,opacity:page===n.id?1:0.4}}>{n.icon}</span>
+            <span style={{fontSize:8,color:page===n.id?"#a5b4fc":"#4b5563",fontWeight:page===n.id?700:400}}>{n.label}</span>
+            {page===n.id&&<div style={{width:16,height:2,background:"#6366f1",borderRadius:99}}/>}
+          </button>
+        ))}
+        <button onClick={()=>setMenuOpen(true)} style={{flex:1,padding:"10px 2px 8px",border:"none",background:"transparent",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:2}}>
+          <span style={{fontSize:16,opacity:0.4}}>{"\u22EF"}</span>
+          <span style={{fontSize:8,color:"#4b5563"}}>More</span>
+        </button>
+      </div>
+
+      {/* MAIN CONTENT */}
+      <main style={{flex:1,overflowY:"auto",paddingBottom:88}}>
+        <Pg tasks={tasks} p0open={p0open} donePct={donePct} urgentDeadlines={urgentDeadlines}
+          contacts={contacts} setContacts={setContacts}
+          bondFacts={bondFacts} setBondFacts={setBondFacts}
+          logs={logs} addLog={addLog} delLog={delLog}
+          ledger={ledger} addLedger={addLedger} delLedger={delLedger}
+          attorneys={attorneys} saveAttorney={saveAttorney} delAttorney={delAttorney}
+          taskChecks={taskChecks} toggleTask={toggleTask} toggleCheck={toggleCheck}
+          reportSec={reportSec} setReportSec={setReportSec}
+          setPage={setPage}/>
+      </main>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   DASHBOARD
+═══════════════════════════════════════════════════════════════════ */
+function DashPage({p0open,donePct,tasks,urgentDeadlines,setPage,bondFacts}){
+  const filledCount=CASE_DEFS.filter(c=>{const f=bondFacts[c.id]||{};return f.noticeMailed||f.forfeitureDate||f.sjStatus}).length;
+  return(
+    <div className="fade" style={{padding:"24px 18px",maxWidth:700,margin:"0 auto"}}>
+      <div style={{marginBottom:24}}>
+        <div style={{fontSize:11,color:"#4b5563",letterSpacing:"0.08em",textTransform:"uppercase",marginBottom:4}}>Defense Overview</div>
+        <h1 style={{fontSize:24,fontWeight:800,color:"#f1f5f9",letterSpacing:"-0.02em",lineHeight:1.2}}>One step at a time.</h1>
+        <p style={{color:"#6b7280",fontSize:14,marginTop:6}}>Everything saves automatically. Any device, any time.</p>
+      </div>
+
+      {urgentDeadlines.map(d=>(
+        <Card key={d.caseId} danger style={{marginBottom:12}}>
+          <div style={{display:"flex",alignItems:"center",gap:8}}>
+            <span className="pulse" style={{fontSize:18}}>{"\u23F0"}</span>
+            <div style={{flex:1}}>
+              <div style={{fontWeight:800,color:"#fca5a5",fontSize:13}}>{d.county} \u2014 185-Day Window Closing</div>
+              <div style={{color:"#6b7280",fontSize:12,marginTop:2}}>Deadline: {fmtDate(d.deadline)} \u00B7 <strong style={{color:d.days<=14?"#f87171":d.days<=30?"#fbbf24":"#94a3b8"}}>{d.days} days left</strong></div>
+            </div>
+            <Btn onClick={()=>setPage("timeline")} variant="danger" style={{fontSize:11,padding:"5px 10px"}}>Timeline \u2192</Btn>
+          </div>
+        </Card>
+      ))}
+
+      {p0open.length>0&&(
+        <Card style={{borderColor:"rgba(239,68,68,0.3)",background:"rgba(239,68,68,0.04)",marginBottom:16}}>
+          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:12}}>
+            <span className="pulse" style={{fontSize:18}}>{"\u{1F6A8}"}</span>
+            <span style={{fontWeight:800,color:"#fca5a5",fontSize:15}}>{p0open.length} Urgent Court Call{p0open.length>1?"s":""} Needed</span>
+          </div>
+          {p0open.slice(0,3).map(t=>(
+            <div key={t.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderTop:"1px solid rgba(255,255,255,0.05)"}}>
+              <div>
+                <div style={{color:"#fcd34d",fontWeight:600,fontSize:13}}>{"\u{1F4DE}"} {t.county}</div>
+                <div style={{color:"#6b7280",fontSize:11,marginTop:2}}>{t.title.slice(0,55)}\u2026</div>
+              </div>
+              <Btn onClick={()=>setPage("tasks")} variant="danger" style={{fontSize:11,padding:"5px 10px"}}>Script \u2192</Btn>
+            </div>
+          ))}
+        </Card>
+      )}
+
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10,marginBottom:16}}>
+        {[{l:"Total Claimed",v:"$575,000",sub:"Verify per county",c:"#f87171"},{l:"Premium Paid",v:"$19,515",sub:"Non-refundable",c:"#fbbf24"},{l:"Tasks Done",v:tasks.filter(t=>t.done).length+"/"+tasks.length,sub:donePct+"% complete",c:"#4ade80"}].map(s=>(
+          <Card key={s.l} style={{padding:"14px 14px"}}>
+            <div style={{fontSize:10,color:"#4b5563",textTransform:"uppercase",letterSpacing:"0.07em",marginBottom:4}}>{s.l}</div>
+            <div style={{fontSize:18,fontWeight:800,color:s.c}}>{s.v}</div>
+            <div style={{fontSize:11,color:"#374151",marginTop:3}}>{s.sub}</div>
+          </Card>
+        ))}
+      </div>
+
+      <Card style={{marginBottom:16,borderColor:filledCount===0?"rgba(251,191,36,0.3)":"rgba(99,102,241,0.3)",background:filledCount===0?"rgba(251,191,36,0.03)":"rgba(99,102,241,0.04)"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+          <div style={{fontWeight:700,color:filledCount===0?"#fcd34d":"#a5b4fc",fontSize:13}}>
+            {filledCount===0?"\u26A0 Bond Timeline \u2014 No Dates Entered Yet":"\u23F1 Bond Timeline"}
+          </div>
+          <Btn onClick={()=>setPage("timeline")} style={{fontSize:11,padding:"5px 10px"}}>{filledCount===0?"Fill In Dates \u2192":"View Timeline \u2192"}</Btn>
+        </div>
+        <div style={{color:"#6b7280",fontSize:12,marginBottom:8}}>{filledCount} of {CASE_DEFS.length} bonds have dates entered. Fill in after each court call.</div>
+        <Bar pct={(filledCount/CASE_DEFS.length)*100} color="#6366f1"/>
+      </Card>
+
+      <Card style={{marginBottom:16}}>
+        <div style={{fontWeight:700,color:"#94a3b8",fontSize:11,textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:12}}>Bond Summary \u2014 5 Cases, 4 Counties</div>
+        {CASE_DEFS.map(c=>{const f=bondFacts[c.id]||{};return(
+          <div key={c.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 0",borderTop:"1px solid rgba(255,255,255,0.04)"}}>
+            <div style={{display:"flex",alignItems:"center",gap:8}}>
+              <div style={{width:8,height:8,borderRadius:"50%",background:c.color,flexShrink:0}}/>
+              <div><span style={{color:"#e2e8f0",fontSize:13,fontWeight:600}}>{c.county}</span><span style={{color:"#4b5563",fontSize:11,marginLeft:6}}>{f.caseNum||c.caseNum}</span></div>
+            </div>
+            <div style={{display:"flex",alignItems:"center",gap:8}}>
+              {f.sjStatus==="entered"&&<Pill label="SJ ENTERED" color="#f87171"/>}
+              {f.sjStatus==="not_entered"&&f.noticeMailed&&<Pill label="WINDOW OPEN" color="#4ade80"/>}
+              <span style={{color:c.color,fontWeight:700,fontSize:13}}>{fmt(c.bond)}</span>
+            </div>
+          </div>
+        )})}
+        <Divider/>
+        <div style={{display:"flex",justifyContent:"space-between"}}>
+          <span style={{color:"#6b7280",fontWeight:700}}>TOTAL</span>
+          <span style={{color:"#f87171",fontWeight:800,fontSize:16}}>$575,000</span>
+        </div>
+      </Card>
+
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:16}}>
+        <Card onClick={()=>setPage("timeline")} highlight style={{cursor:"pointer"}}><div style={{fontSize:22,marginBottom:6}}>{"\u23F1"}</div><div style={{fontWeight:700,color:"#c7d2fe",fontSize:14}}>Bond Timeline</div><div style={{color:"#4b5563",fontSize:12,marginTop:3}}>Deadlines + 185-day calculator</div></Card>
+        <Card onClick={()=>setPage("tasks")} style={{cursor:"pointer",background:"rgba(239,68,68,0.04)",borderColor:"rgba(239,68,68,0.2)"}}><div style={{fontSize:22,marginBottom:6}}>{"\u{1F4DE}"}</div><div style={{fontWeight:700,color:"#fca5a5",fontSize:14}}>Start Calling Courts</div><div style={{color:"#4b5563",fontSize:12,marginTop:3}}>Scripts ready. P0 first.</div></Card>
+        <Card onClick={()=>setPage("attorneys")} style={{cursor:"pointer"}}><div style={{fontSize:22,marginBottom:6}}>{"\u{1F454}"}</div><div style={{fontWeight:700,color:"#e2e8f0",fontSize:14}}>Attorney Tracker</div><div style={{color:"#4b5563",fontSize:12,marginTop:3}}>Log every attorney you contact</div></Card>
+        <Card onClick={()=>setPage("report")} style={{cursor:"pointer"}}><div style={{fontSize:22,marginBottom:6}}>{"\u{1F4D6}"}</div><div style={{fontWeight:700,color:"#e2e8f0",fontSize:14}}>Full Report</div><div style={{color:"#4b5563",fontSize:12,marginTop:3}}>All facts in plain language</div></Card>
+      </div>
+
+      <div><div style={{display:"flex",justifyContent:"space-between",fontSize:11,color:"#4b5563",marginBottom:5}}><span>TASK PROGRESS</span><span>{donePct}%</span></div><Bar pct={donePct}/></div>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   BOND TIMELINE — 185-day deadline calculator
+═══════════════════════════════════════════════════════════════════ */
+function TimelinePage({bondFacts,setBondFacts,setPage}){
+  const[editing,setEditing]=useState(null);
+  const saveField=(caseId,field,value)=>{setBondFacts(p=>({...p,[caseId]:{...(p[caseId]||{}),[field]:value}}))};
+
+  const BondCard=({c})=>{
+    const f=bondFacts[c.id]||{};
+    const isEd=editing===c.id;
+    const deadline185=f.noticeMailed?addDays(f.noticeMailed,185):null;
+    const daysLeft=deadline185?daysUntil(deadline185):null;
+    const sjEntered=f.sjStatus==='entered';
+    let statusLabel="UNKNOWN",statusColor="#6b7280";
+    if(sjEntered){statusLabel="SJ ENTERED \u2014 CRITICAL";statusColor="#f87171"}
+    else if(f.noticeMailed&&daysLeft!==null){
+      if(daysLeft<0){statusLabel="WINDOW EXPIRED \u2014 VERIFY";statusColor="#f87171"}
+      else if(daysLeft<=14){statusLabel=daysLeft+"d LEFT \u2014 URGENT";statusColor="#f87171"}
+      else if(daysLeft<=30){statusLabel=daysLeft+"d LEFT \u2014 WATCH";statusColor="#fbbf24"}
+      else{statusLabel=daysLeft+"d LEFT \u2014 ACTIVE";statusColor="#4ade80"}
+    } else if(f.forfeitureDate){statusLabel="FORFEITED \u2014 NOTICE UNKNOWN";statusColor="#fbbf24"}
+
+    return(
+      <Card style={{marginBottom:12,borderColor:isEd?"rgba(99,102,241,0.4)":undefined}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:10}}>
+          <div style={{display:"flex",alignItems:"center",gap:8}}>
+            <div style={{width:10,height:10,borderRadius:"50%",background:c.color,flexShrink:0}}/>
+            <div><div style={{fontWeight:800,color:"#f1f5f9",fontSize:15}}>{c.county}</div><div style={{color:"#6b7280",fontSize:11}}>{fmt(c.bond)}</div></div>
+          </div>
+          <div style={{display:"flex",alignItems:"center",gap:6}}>
+            <Pill label={statusLabel} color={statusColor}/>
+            <button onClick={()=>setEditing(isEd?null:c.id)} style={{background:"transparent",border:"1px solid rgba(255,255,255,0.1)",borderRadius:6,color:"#6b7280",cursor:"pointer",padding:"4px 8px",fontSize:12}}>{isEd?"Done":"Edit"}</button>
+          </div>
+        </div>
+
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:8,marginBottom:10}}>
+          {[{label:"FTA Date",key:"ftaDate",hint:"Nov 26 2025"},{label:"Forfeiture Declared",key:"forfeitureDate",hint:"In court minutes"},{label:"Notice Mailed",key:"noticeMailed",hint:"CRITICAL \u2014 starts clock"},{label:"Summary Judgment",key:"sjDate",hint:"If entered"}].map(field=>(
+            <div key={field.key} style={{background:"rgba(0,0,0,0.3)",borderRadius:8,padding:"10px 12px",border:"1px solid "+(f[field.key]?"rgba(99,102,241,0.3)":"rgba(255,255,255,0.05)")}}>
+              <div style={{fontSize:10,color:f[field.key]?"#818cf8":"#4b5563",fontWeight:700,textTransform:"uppercase",marginBottom:4}}>{field.label}</div>
+              {isEd?<input type="date" value={f[field.key]||""} onChange={e=>saveField(c.id,field.key,e.target.value)} style={{width:"100%",background:"transparent",border:"none",color:"#e2e8f0",fontSize:12,padding:0,outline:"none"}}/>:
+              <div style={{color:f[field.key]?"#e2e8f0":"#374151",fontSize:12,fontWeight:f[field.key]?600:400}}>{f[field.key]?fmtDate(f[field.key]):<span style={{color:"#374151"}}>{field.hint}</span>}</div>}
+            </div>
+          ))}
+        </div>
+
+        {f.noticeMailed&&(
+          <div style={{background:sjEntered?"rgba(239,68,68,0.07)":daysLeft!==null&&daysLeft<=30?"rgba(251,191,36,0.06)":"rgba(74,222,128,0.05)",border:"1px solid "+(sjEntered?"rgba(239,68,68,0.2)":daysLeft!==null&&daysLeft<=30?"rgba(251,191,36,0.2)":"rgba(74,222,128,0.15)"),borderRadius:8,padding:"10px 14px",marginBottom:8}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+              <div>
+                <div style={{fontSize:11,fontWeight:700,color:"#6b7280",textTransform:"uppercase",marginBottom:3}}>185-Day Deadline (PC 1305)</div>
+                <div style={{fontSize:14,fontWeight:800,color:sjEntered?"#f87171":daysLeft!==null&&daysLeft<=14?"#f87171":daysLeft!==null&&daysLeft<=30?"#fbbf24":"#4ade80"}}>
+                  {fmtDate(deadline185)} {daysLeft!==null&&!sjEntered&&(" \u00B7 "+(daysLeft>=0?daysLeft+" days remaining":"EXPIRED"))}
+                  {sjEntered&&" \u00B7 Summary Judgment Already Entered"}
+                </div>
+              </div>
+              {daysLeft!==null&&daysLeft>=0&&!sjEntered&&(
+                <div style={{textAlign:"right"}}>
+                  <div style={{fontSize:28,fontWeight:800,color:daysLeft<=14?"#f87171":daysLeft<=30?"#fbbf24":"#4ade80",lineHeight:1}}>{daysLeft}</div>
+                  <div style={{fontSize:10,color:"#6b7280"}}>days left</div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {isEd&&(
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginTop:8}}>
+            <div>
+              <label style={{fontSize:11,color:"#6b7280",display:"block",marginBottom:3}}>Summary Judgment Status</label>
+              <select value={f.sjStatus||""} onChange={e=>saveField(c.id,'sjStatus',e.target.value)} style={{width:"100%",padding:"7px 10px",borderRadius:7,border:"1px solid rgba(255,255,255,0.1)",background:"#0d0d1a",color:"#e2e8f0",fontSize:13}}>
+                <option value="">Unknown</option>
+                <option value="not_entered">Not Yet Entered</option>
+                <option value="entered">Entered \u2014 CRITICAL</option>
+                <option value="vacated">Vacated / Set Aside</option>
+              </select>
+            </div>
+            <div>
+              <label style={{fontSize:11,color:"#6b7280",display:"block",marginBottom:3}}>Confirmed Case Number</label>
+              <input value={f.caseNum||""} onChange={e=>saveField(c.id,'caseNum',e.target.value)} placeholder={c.caseNum} style={{width:"100%",padding:"7px 10px",borderRadius:7,border:"1px solid rgba(255,255,255,0.1)",background:"rgba(255,255,255,0.04)",color:"#e2e8f0",fontSize:13}}/>
+            </div>
+          </div>
+        )}
+
+        {isEd&&(
+          <div style={{marginTop:8}}>
+            <label style={{fontSize:11,color:"#6b7280",display:"block",marginBottom:3}}>Notes from court call</label>
+            <textarea value={f.notes||""} onChange={e=>saveField(c.id,'notes',e.target.value)} placeholder="Who you spoke with, what they confirmed, what was unclear" rows={3} style={{width:"100%",padding:"8px 10px",borderRadius:7,border:"1px solid rgba(255,255,255,0.1)",background:"rgba(255,255,255,0.04)",color:"#e2e8f0",fontSize:13,resize:"vertical"}}/>
+          </div>
+        )}
+        {!isEd&&f.notes&&<div style={{fontSize:12,color:"#6b7280",borderTop:"1px solid rgba(255,255,255,0.06)",paddingTop:8,marginTop:4,lineHeight:1.5}}>{f.notes}</div>}
+      </Card>
+    );
+  };
+
+  return(
+    <div className="fade" style={{padding:"24px 18px",maxWidth:700,margin:"0 auto"}}>
+      <div style={{marginBottom:20}}>
+        <div style={{fontSize:11,color:"#4b5563",letterSpacing:"0.08em",textTransform:"uppercase",marginBottom:4}}>The Most Important Page</div>
+        <h2 style={{fontSize:22,fontWeight:800,color:"#f1f5f9"}}>Bond Timeline</h2>
+        <p style={{color:"#6b7280",fontSize:13,marginTop:6}}>Fill in dates as you learn them from each court call. The 185-day deadline calculator updates automatically.</p>
+      </div>
+      <Card style={{borderColor:"rgba(251,191,36,0.25)",background:"rgba(251,191,36,0.04)",marginBottom:18}}>
+        <div style={{fontWeight:800,color:"#fcd34d",fontSize:13}}>{"\u{1F4CD}"} How to use this page</div>
+        <div style={{color:"#6b7280",fontSize:12,marginTop:5,lineHeight:1.6}}>After each court call, tap <strong style={{color:"#e2e8f0"}}>Edit</strong> on the matching bond and fill in the dates the clerk gives you. The moment you enter the Notice Mailed date, the 185-day deadline appears automatically. This is the window you must protect.</div>
+      </Card>
+      {CASE_DEFS.map(c=><BondCard key={c.id} c={c}/>)}
+      <Card style={{marginTop:8,background:"rgba(239,68,68,0.04)",borderColor:"rgba(239,68,68,0.2)"}}>
+        <div style={{fontWeight:700,color:"#fca5a5",fontSize:13,marginBottom:4}}>{"\u26A0"} If Summary Judgment has already been entered</div>
+        <div style={{color:"#6b7280",fontSize:12,lineHeight:1.6}}>Mark that bond's SJ status as "Entered \u2014 CRITICAL" and immediately move to contacting a California bail forfeiture attorney. SJ means the court has ruled against the surety \u2014 but there may still be options. Time is critical.</div>
+      </Card>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   REPORT
+═══════════════════════════════════════════════════════════════════ */
+function ReportPage({reportSec,setReportSec}){
+  if(reportSec){
+    const s=REPORT.find(r=>r.id===reportSec);
+    const idx=REPORT.findIndex(r=>r.id===reportSec);
+    return(
+      <div className="fade" style={{padding:"24px 18px",maxWidth:700,margin:"0 auto"}}>
+        <button onClick={()=>setReportSec(null)} style={{background:"transparent",border:"none",color:"#6b7280",cursor:"pointer",marginBottom:16,fontSize:13,display:"flex",alignItems:"center",gap:4}}>{"\u2190"} Back to Report</button>
+        <div style={{fontSize:28,marginBottom:8}}>{s.icon}</div>
+        <div style={{fontSize:10,color:"#6366f1",fontWeight:800,letterSpacing:"0.1em",textTransform:"uppercase",marginBottom:4}}>Section {idx+1} of {REPORT.length}</div>
+        <h2 style={{fontSize:20,fontWeight:800,color:"#f1f5f9",marginBottom:20}}>{s.title}</h2>
+        <div style={{background:"rgba(255,255,255,0.02)",border:"1px solid rgba(255,255,255,0.06)",borderRadius:12,padding:"22px 20px"}}>
+          {s.body.split("\n").map((line,i)=>{
+            if(!line.trim()) return <div key={i} style={{height:8}}/>;
+            if(line.startsWith("\u2022")) return <div key={i} style={{display:"flex",gap:8,marginBottom:6}}><span style={{color:"#6366f1",flexShrink:0}}>{"\u2022"}</span><span style={{color:"#94a3b8",fontSize:14,lineHeight:1.7}}>{line.slice(1).trim()}</span></div>;
+            if(/^Step \d/.test(line)||/^(FIRST|SECOND|THIRD|FOURTH|FIFTH|SIXTH|DO:|DON\u2019T:)/.test(line)||/^Item \d/.test(line)) return <div key={i} style={{fontWeight:700,color:"#c7d2fe",fontSize:13,marginTop:14,marginBottom:6}}>{line}</div>;
+            if(/^\d\)/.test(line)) return <div key={i} style={{display:"flex",gap:8,marginBottom:6}}><span style={{color:"#818cf8",flexShrink:0,fontWeight:700,fontSize:13}}>{line.split(")")[0]})</span><span style={{color:"#94a3b8",fontSize:14,lineHeight:1.7}}>{line.slice(line.indexOf(")")+1).trim()}</span></div>;
+            return <p key={i} style={{color:"#94a3b8",lineHeight:1.75,fontSize:14,marginBottom:2}}>{line}</p>;
+          })}
+        </div>
+        <div style={{display:"flex",gap:8,marginTop:16}}>
+          {idx>0&&<Btn onClick={()=>setReportSec(REPORT[idx-1].id)} variant="ghost">{"\u2190"} Prev</Btn>}
+          {idx<REPORT.length-1&&<Btn onClick={()=>setReportSec(REPORT[idx+1].id)}>Next {"\u2192"}</Btn>}
+        </div>
+      </div>
+    );
+  }
+  return(
+    <div className="fade" style={{padding:"24px 18px",maxWidth:700,margin:"0 auto"}}>
+      <div style={{marginBottom:20}}>
+        <h2 style={{fontSize:22,fontWeight:800,color:"#f1f5f9"}}>Full Report</h2>
+        <p style={{color:"#6b7280",fontSize:13,marginTop:6}}>Everything in plain English. Tap any section to read it.</p>
+      </div>
+      <Card style={{borderColor:"rgba(251,191,36,0.25)",background:"rgba(251,191,36,0.04)",marginBottom:18}}>
+        <div style={{fontWeight:800,color:"#fcd34d",fontSize:13}}>{"\u{1F4A1}"} Start with Section 3 if you have 5 minutes.</div>
+        <div style={{color:"#6b7280",fontSize:12,marginTop:4,lineHeight:1.5}}>It explains what must legally happen before you owe $575,000.</div>
+      </Card>
+      <div style={{display:"flex",flexDirection:"column",gap:8}}>
+        {REPORT.map((s,i)=>(
+          <Card key={s.id} onClick={()=>setReportSec(s.id)} style={{cursor:"pointer"}}>
+            <div style={{display:"flex",alignItems:"center",gap:12}}>
+              <div style={{width:36,height:36,borderRadius:9,background:"rgba(99,102,241,0.12)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,flexShrink:0}}>{s.icon}</div>
+              <div style={{flex:1}}>
+                <div style={{fontSize:10,color:"#6366f1",fontWeight:800,textTransform:"uppercase"}}>Section {i+1}</div>
+                <div style={{fontWeight:700,color:"#e2e8f0",fontSize:14,marginTop:1}}>{s.title}</div>
+              </div>
+              <span style={{color:"#374151"}}>{"\u203A"}</span>
+            </div>
+          </Card>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   TASKS
+═══════════════════════════════════════════════════════════════════ */
+function TasksPage({tasks,toggleTask,taskChecks,toggleCheck,addLog}){
+  const[expanded,setExpanded]=useState(null);
+  const[filter,setFilter]=useState("ALL");
+  const pColor={P0:"#f87171",P1:"#fbbf24",P2:"#60a5fa"};
+  const filtered=tasks.filter(t=>filter==="ALL"||t.p===filter||(filter==="OPEN"&&!t.done)||(filter==="DONE"&&t.done));
+  return(
+    <div className="fade" style={{padding:"24px 18px",maxWidth:700,margin:"0 auto"}}>
+      <div style={{marginBottom:16}}>
+        <h2 style={{fontSize:20,fontWeight:800,color:"#f1f5f9"}}>Tasks</h2>
+        <p style={{color:"#6b7280",fontSize:13,marginTop:4}}>P0 first. Each has a ready-to-use phone script.</p>
+      </div>
+      <div style={{display:"flex",gap:5,flexWrap:"wrap",marginBottom:16}}>
+        {["ALL","P0","P1","P2","OPEN","DONE"].map(f=>(
+          <button key={f} onClick={()=>setFilter(f)} style={{fontFamily:"inherit",padding:"4px 10px",borderRadius:6,border:"1px solid rgba(255,255,255,0.08)",background:filter===f?"rgba(99,102,241,0.25)":"transparent",color:filter===f?"#a5b4fc":"#6b7280",fontSize:11,cursor:"pointer",fontWeight:700}}>{f}</button>
+        ))}
+      </div>
+      {filtered.map(t=>{
+        const exp=expanded===t.id;
+        const base=TASKS_DEF.find(x=>x.id===t.id);
+        const chks=taskChecks[t.id]||(base?base.checklist.map(()=>false):[]);
+        return(
+          <Card key={t.id} style={{marginBottom:10,opacity:t.done?0.45:1}}>
+            <div style={{display:"flex",gap:10,alignItems:"flex-start"}}>
+              <button onClick={()=>toggleTask(t.id)} style={{width:22,height:22,borderRadius:6,border:"2px solid "+(t.done?"#4ade80":"rgba(255,255,255,0.18)"),background:t.done?"#4ade80":"transparent",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,marginTop:1}}>
+                {t.done&&<span style={{color:"#000",fontSize:13,fontWeight:900,lineHeight:1}}>{"\u2713"}</span>}
+              </button>
+              <div style={{flex:1}}>
+                <div style={{display:"flex",gap:5,flexWrap:"wrap",marginBottom:5}}>
+                  <Pill label={t.p} color={pColor[t.p]}/><Pill label={t.county} color="#6366f1"/>
+                </div>
+                <div style={{fontWeight:600,color:t.done?"#374151":"#e2e8f0",fontSize:14,textDecoration:t.done?"line-through":"none",lineHeight:1.4}}>{t.title}</div>
+              </div>
+              <button onClick={()=>setExpanded(exp?null:t.id)} style={{background:"transparent",border:"none",color:"#4b5563",cursor:"pointer",fontSize:16,flexShrink:0,padding:"2px 6px"}}>{exp?"\u25B2":"\u25BC"}</button>
+            </div>
+            {exp&&(
+              <div style={{marginTop:14,borderTop:"1px solid rgba(255,255,255,0.06)",paddingTop:14}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+                  <div style={{fontSize:11,fontWeight:800,color:"#818cf8",textTransform:"uppercase"}}>{"\u{1F4DE}"} Call Script</div>
+                  <CopyBtn text={t.script}/>
+                </div>
+                <pre style={{background:"rgba(0,0,0,0.4)",border:"1px solid rgba(99,102,241,0.15)",borderRadius:9,padding:"14px 16px",color:"#94a3b8",fontSize:13,lineHeight:1.7,whiteSpace:"pre-wrap",fontFamily:"'DM Mono',monospace",marginBottom:14}}>{t.script}</pre>
+                <div style={{marginBottom:12}}>
+                  <div style={{fontSize:11,fontWeight:800,color:"#6b7280",textTransform:"uppercase",marginBottom:8}}>Before You Mark Done</div>
+                  {t.checklist.map((item,i)=>(
+                    <div key={i} onClick={()=>toggleCheck(t.id,i)} style={{display:"flex",alignItems:"center",gap:8,marginBottom:7,cursor:"pointer"}}>
+                      <div style={{width:18,height:18,borderRadius:5,border:"2px solid "+(chks[i]?"#6366f1":"rgba(255,255,255,0.15)"),background:chks[i]?"#6366f1":"transparent",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
+                        {chks[i]&&<span style={{color:"#fff",fontSize:11,lineHeight:1}}>{"\u2713"}</span>}
+                      </div>
+                      <span style={{color:chks[i]?"#4ade80":"#94a3b8",fontSize:13,textDecoration:chks[i]?"line-through":"none"}}>{item}</span>
+                    </div>
+                  ))}
+                </div>
+                <Btn variant="ghost" style={{fontSize:12}} onClick={()=>{addLog({contact:t.county+" court",channel:"PHONE",summary:"Worked on: "+t.title,outcome:"In progress"});alert("Logged to Logbook!")}}>
+                  {"\u{1F4DD}"} Log this call
+                </Btn>
+              </div>
+            )}
+          </Card>
+        );
+      })}
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   ATTORNEY TRACKER
+═══════════════════════════════════════════════════════════════════ */
+function AttorneyPage({attorneys,saveAttorney,delAttorney}){
+  const[showForm,setShowForm]=useState(false);
+  const[editing,setEditing]=useState(null);
+  const blank={name:"",firm:"",phone:"",email:"",specialty:"",counties:"",flat_fee:false,notes:"",status:"contacted"};
+  const[form,setForm]=useState(blank);
+
+  const open=(att=null)=>{setForm(att?{...att,flat_fee:att.flat_fee===1||att.flat_fee===true}:blank);setEditing(att?att.id:null);setShowForm(true)};
+  const submit=async()=>{if(!form.name.trim())return;await saveAttorney({...form,id:editing||String(Date.now())});setShowForm(false);setForm(blank);setEditing(null)};
+  const statusColor={contacted:"#818cf8",scheduled:"#fbbf24",consulted:"#60a5fa",hired:"#4ade80",declined:"#f87171"};
+
+  return(
+    <div className="fade" style={{padding:"24px 18px",maxWidth:700,margin:"0 auto"}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:16}}>
+        <div><h2 style={{fontSize:20,fontWeight:800,color:"#f1f5f9"}}>Attorney Tracker</h2><p style={{color:"#6b7280",fontSize:13,marginTop:4}}>Log every attorney you contact. Get at least 3 consultations.</p></div>
+        <Btn onClick={()=>open()} style={{fontSize:12,padding:"8px 14px"}}>+ Add</Btn>
+      </div>
+
+      <Card style={{borderColor:"rgba(251,191,36,0.25)",background:"rgba(251,191,36,0.04)",marginBottom:16}}>
+        <div style={{fontWeight:800,color:"#fcd34d",fontSize:12}}>What to look for in a CA bail forfeiture attorney:</div>
+        <div style={{color:"#6b7280",fontSize:12,marginTop:5,lineHeight:1.6}}>
+          {"\u2022"} Experience with PC 1305\u20131306 specifically<br/>
+          {"\u2022"} Has handled multi-county forfeiture cases<br/>
+          {"\u2022"} Offers flat-fee procedural audits<br/>
+          {"\u2022"} Can identify notice timing defects without a retainer
+        </div>
+      </Card>
+
+      {showForm&&(
+        <Card style={{marginBottom:16,borderColor:"rgba(99,102,241,0.3)"}}>
+          <div style={{fontWeight:700,color:"#a5b4fc",fontSize:14,marginBottom:14}}>{editing?"Edit Attorney":"Add Attorney"}</div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
+            {[["Attorney Name","name"],["Firm / Solo","firm"],["Phone","phone"],["Email","email"]].map(([l,k])=>(
+              <div key={k}><label style={{fontSize:11,color:"#6b7280",display:"block",marginBottom:3}}>{l}</label><input value={form[k]||""} onChange={e=>setForm(p=>({...p,[k]:e.target.value}))} style={{width:"100%",padding:"7px 10px",borderRadius:7,border:"1px solid rgba(255,255,255,0.1)",background:"rgba(255,255,255,0.04)",color:"#e2e8f0",fontSize:13}}/></div>
+            ))}
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10,marginBottom:10}}>
+            <div>
+              <label style={{fontSize:11,color:"#6b7280",display:"block",marginBottom:3}}>Specialty</label>
+              <select value={form.specialty||""} onChange={e=>setForm(p=>({...p,specialty:e.target.value}))} style={{width:"100%",padding:"7px 10px",borderRadius:7,border:"1px solid rgba(255,255,255,0.1)",background:"#0d0d1a",color:"#e2e8f0",fontSize:13}}>
+                <option value="">{"\u2014"} Select {"\u2014"}</option>
+                <option>CA Bail Forfeiture (PC 1305-1306)</option>
+                <option>Criminal Defense \u2014 CA</option>
+                <option>AZ Property / Judgment</option>
+                <option>General Civil</option>
+              </select>
+            </div>
+            <div>
+              <label style={{fontSize:11,color:"#6b7280",display:"block",marginBottom:3}}>Counties</label>
+              <input value={form.counties||""} onChange={e=>setForm(p=>({...p,counties:e.target.value}))} placeholder="OC, SD, SB" style={{width:"100%",padding:"7px 10px",borderRadius:7,border:"1px solid rgba(255,255,255,0.1)",background:"rgba(255,255,255,0.04)",color:"#e2e8f0",fontSize:13}}/>
+            </div>
+            <div>
+              <label style={{fontSize:11,color:"#6b7280",display:"block",marginBottom:3}}>Status</label>
+              <select value={form.status||"contacted"} onChange={e=>setForm(p=>({...p,status:e.target.value}))} style={{width:"100%",padding:"7px 10px",borderRadius:7,border:"1px solid rgba(255,255,255,0.1)",background:"#0d0d1a",color:"#e2e8f0",fontSize:13}}>
+                {["contacted","scheduled","consulted","hired","declined"].map(s=><option key={s}>{s}</option>)}
+              </select>
+            </div>
+          </div>
+          <div style={{marginBottom:10}}>
+            <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer"}}>
+              <div onClick={()=>setForm(p=>({...p,flat_fee:!p.flat_fee}))} style={{width:18,height:18,borderRadius:5,border:"2px solid "+(form.flat_fee?"#6366f1":"rgba(255,255,255,0.15)"),background:form.flat_fee?"#6366f1":"transparent",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
+                {form.flat_fee&&<span style={{color:"#fff",fontSize:11,lineHeight:1}}>{"\u2713"}</span>}
+              </div>
+              <span style={{fontSize:13,color:"#94a3b8"}}>Offers flat-fee procedural audit</span>
+            </label>
+          </div>
+          <div style={{marginBottom:12}}>
+            <label style={{fontSize:11,color:"#6b7280",display:"block",marginBottom:3}}>Notes</label>
+            <textarea value={form.notes||""} onChange={e=>setForm(p=>({...p,notes:e.target.value}))} placeholder="Fee estimate, what they said, experience with PC 1305-1306\u2026" rows={3} style={{width:"100%",padding:"8px 10px",borderRadius:7,border:"1px solid rgba(255,255,255,0.1)",background:"rgba(255,255,255,0.04)",color:"#e2e8f0",fontSize:13,resize:"vertical"}}/>
+          </div>
+          <div style={{display:"flex",gap:8}}>
+            <Btn onClick={submit} style={{fontSize:12}}>Save</Btn>
+            <Btn variant="ghost" onClick={()=>{setShowForm(false);setEditing(null)}} style={{fontSize:12}}>Cancel</Btn>
+          </div>
+        </Card>
+      )}
+
+      {attorneys.length===0?(
+        <div style={{textAlign:"center",padding:"40px 20px"}}><div style={{fontSize:36,marginBottom:10}}>{"\u{1F454}"}</div><div style={{color:"#6b7280",fontSize:14}}>No attorneys logged yet.</div><div style={{color:"#374151",fontSize:12,marginTop:4}}>You need at least 3 consultations. Start with Task 7.</div></div>
+      ):attorneys.map(a=>(
+        <Card key={a.id} style={{marginBottom:10}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+            <div style={{flex:1}}>
+              <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4,flexWrap:"wrap"}}>
+                <div style={{fontWeight:800,color:"#f1f5f9",fontSize:15}}>{a.name}</div>
+                <Pill label={a.status} color={statusColor[a.status]||"#6b7280"}/>
+                {(a.flat_fee===1||a.flat_fee===true)&&<Pill label="FLAT FEE" color="#4ade80"/>}
+              </div>
+              {a.firm&&<div style={{color:"#818cf8",fontSize:12,marginBottom:4}}>{a.firm}</div>}
+              <div style={{display:"flex",gap:12,flexWrap:"wrap"}}>
+                {a.phone&&<span style={{color:"#4ade80",fontSize:13}}>{"\u{1F4DE}"} {a.phone}</span>}
+                {a.email&&<span style={{color:"#60a5fa",fontSize:13}}>{"\u2709\uFE0F"} {a.email}</span>}
+                {a.counties&&<span style={{color:"#6b7280",fontSize:12}}>{"\u{1F4CD}"} {a.counties}</span>}
+              </div>
+              {a.specialty&&<div style={{color:"#6b7280",fontSize:12,marginTop:4}}>{"\u{1F3AF}"} {a.specialty}</div>}
+              {a.notes&&<div style={{color:"#94a3b8",fontSize:13,marginTop:8,lineHeight:1.5,borderTop:"1px solid rgba(255,255,255,0.05)",paddingTop:8}}>{a.notes}</div>}
+            </div>
+            <div style={{display:"flex",flexDirection:"column",gap:6,marginLeft:10}}>
+              <Btn variant="ghost" onClick={()=>open(a)} style={{fontSize:11,padding:"5px 10px"}}>Edit</Btn>
+              <Btn variant="danger" onClick={()=>delAttorney(a.id)} style={{fontSize:11,padding:"5px 10px"}}>{"\u00D7"}</Btn>
+            </div>
+          </div>
+        </Card>
+      ))}
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   CASES
+═══════════════════════════════════════════════════════════════════ */
+function CasesPage({bondFacts,setPage}){
+  const[open,setOpen]=useState(null);
+  return(
+    <div className="fade" style={{padding:"24px 18px",maxWidth:700,margin:"0 auto"}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
+        <div><h2 style={{fontSize:20,fontWeight:800,color:"#f1f5f9"}}>Case Matrix</h2><p style={{color:"#6b7280",fontSize:13,marginTop:4}}>5 bonds \u00B7 4 counties. Tap to expand.</p></div>
+        <Btn onClick={()=>setPage("timeline")} style={{fontSize:11,padding:"6px 12px"}}>{"\u23F1"} Timeline {"\u2192"}</Btn>
+      </div>
+      {CASE_DEFS.map(c=>{
+        const f=bondFacts[c.id]||{};
+        return(
+          <Card key={c.id} onClick={()=>setOpen(open===c.id?null:c.id)} style={{marginBottom:10,cursor:"pointer",borderColor:open===c.id?c.color+"44":undefined}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+              <div style={{display:"flex",alignItems:"center",gap:10}}>
+                <div style={{width:10,height:10,borderRadius:"50%",background:c.color,flexShrink:0}}/>
+                <div><div style={{fontWeight:700,color:"#f1f5f9",fontSize:15}}>{c.county}</div><div style={{color:"#6b7280",fontSize:11,marginTop:1}}>Case: {f.caseNum||c.caseNum}</div></div>
+              </div>
+              <div style={{textAlign:"right"}}>
+                <div style={{fontWeight:800,color:c.color,fontSize:16}}>{fmt(c.bond)}</div>
+                <Pill label={f.sjStatus==="entered"?"SJ ENTERED":f.noticeMailed?"NOTICE MAILED":"UNKNOWN"} color={f.sjStatus==="entered"?"#f87171":f.noticeMailed?"#4ade80":"#6b7280"}/>
+              </div>
+            </div>
+            {open===c.id&&(
+              <div style={{marginTop:14,paddingTop:14,borderTop:"1px solid rgba(255,255,255,0.06)"}}>
+                <div style={{marginBottom:10}}>
+                  <div style={{fontSize:10,color:"#6b7280",textTransform:"uppercase",fontWeight:700,marginBottom:5}}>Charges</div>
+                  {c.charges.map(ch=><div key={ch} style={{color:"#94a3b8",fontSize:13,marginBottom:3}}>{"\u2022"} {ch}</div>)}
+                </div>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:10}}>
+                  {[["FTA Date",f.ftaDate],["Forfeiture Declared",f.forfeitureDate],["Notice Mailed",f.noticeMailed],["Summary Judgment",f.sjDate]].map(([label,val])=>(
+                    <div key={label} style={{background:"rgba(0,0,0,0.3)",borderRadius:7,padding:"8px 10px"}}>
+                      <div style={{fontSize:10,color:"#4b5563",textTransform:"uppercase",marginBottom:3}}>{label}</div>
+                      <div style={{fontSize:13,color:val?"#e2e8f0":"#374151",fontWeight:val?600:400}}>{val?fmtDate(val):"Not yet confirmed"}</div>
+                    </div>
+                  ))}
+                </div>
+                <Btn onClick={e=>{e.stopPropagation();setPage("timeline")}} variant="ghost" style={{fontSize:11,padding:"5px 10px"}}>Edit dates in Timeline {"\u2192"}</Btn>
+              </div>
+            )}
+          </Card>
+        );
+      })}
+      <Card highlight style={{marginTop:4}}>
+        <div style={{display:"flex",justifyContent:"space-between"}}>
+          <div><div style={{fontWeight:800,color:"#a5b4fc"}}>Total \u2014 All 5 Bonds</div><div style={{color:"#6b7280",fontSize:12,marginTop:2}}>4 counties \u00B7 confirmed from signed documents</div></div>
+          <div style={{fontWeight:800,fontSize:20,color:"#f87171"}}>$575,000</div>
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   CONTACTS
+═══════════════════════════════════════════════════════════════════ */
+function ContactsPage({contacts,setContacts}){
+  const[editing,setEditing]=useState(null);
+  const[form,setForm]=useState({phone:"",email:"",notes:""});
+  const save=id=>{setContacts(p=>p.map(c=>c.id===id?{...c,...form,filled:!!(form.phone||form.email)}:c));setEditing(null)};
+  return(
+    <div className="fade" style={{padding:"24px 18px",maxWidth:700,margin:"0 auto"}}>
+      <div style={{marginBottom:16}}><h2 style={{fontSize:20,fontWeight:800,color:"#f1f5f9"}}>Contacts</h2><p style={{color:"#6b7280",fontSize:13,marginTop:4}}>Numbers marked "verify" should be confirmed before calling.</p></div>
+      {contacts.map(c=>(
+        <Card key={c.id} style={{marginBottom:10}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:10}}>
+            <div style={{flex:1}}>
+              <div style={{fontWeight:700,color:"#f1f5f9",fontSize:15}}>{c.name}</div>
+              <div style={{color:"#818cf8",fontSize:12,marginBottom:6}}>{c.org}</div>
+              {c.phone&&<div style={{display:"flex",alignItems:"center",gap:5,marginBottom:3}}><span>{"\u{1F4DE}"}</span><a href={"tel:"+c.phone.replace(/[^\d+]/g,'')} style={{color:"#4ade80",fontSize:13,textDecoration:"none"}}>{c.phone}</a></div>}
+              {c.email&&<div style={{display:"flex",alignItems:"center",gap:5,marginBottom:3}}><span>{"\u2709\uFE0F"}</span><a href={"mailto:"+c.email} style={{color:"#60a5fa",fontSize:13,textDecoration:"none"}}>{c.email}</a></div>}
+              <div style={{fontSize:12,color:"#4b5563",marginTop:5,lineHeight:1.5}}>{c.notes}</div>
+            </div>
+            {editing!==c.id&&(
+              <Btn variant="ghost" style={{fontSize:11,padding:"5px 10px",flexShrink:0}} onClick={()=>{setEditing(c.id);setForm({phone:c.phone||"",email:c.email||"",notes:c.notes||""})}}>{c.filled?"Edit":"+ Fill in"}</Btn>
+            )}
+          </div>
+          {editing===c.id&&(
+            <div style={{marginTop:12,borderTop:"1px solid rgba(255,255,255,0.06)",paddingTop:12}}>
+              {[["Phone","phone"],["Email","email"]].map(([l,f])=>(
+                <div key={f} style={{marginBottom:8}}><label style={{fontSize:11,color:"#6b7280",display:"block",marginBottom:3}}>{l}</label><input value={form[f]} onChange={e=>setForm(p=>({...p,[f]:e.target.value}))} style={{width:"100%",padding:"7px 10px",borderRadius:7,border:"1px solid rgba(255,255,255,0.1)",background:"rgba(255,255,255,0.04)",color:"#e2e8f0",fontSize:13}}/></div>
+              ))}
+              <div style={{marginBottom:10}}><label style={{fontSize:11,color:"#6b7280",display:"block",marginBottom:3}}>Notes</label><textarea value={form.notes} onChange={e=>setForm(p=>({...p,notes:e.target.value}))} rows={2} style={{width:"100%",padding:"8px 10px",borderRadius:7,border:"1px solid rgba(255,255,255,0.1)",background:"rgba(255,255,255,0.04)",color:"#e2e8f0",fontSize:13,resize:"vertical"}}/></div>
+              <div style={{display:"flex",gap:8}}><Btn onClick={()=>save(c.id)} style={{fontSize:12}}>Save</Btn><Btn variant="ghost" onClick={()=>setEditing(null)} style={{fontSize:12}}>Cancel</Btn></div>
+            </div>
+          )}
+        </Card>
+      ))}
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   LOGBOOK
+═══════════════════════════════════════════════════════════════════ */
+function LogbookPage({logs,addLog,delLog}){
+  const[show,setShow]=useState(false);
+  const[form,setForm]=useState({contact:"",channel:"PHONE",summary:"",outcome:""});
+  const submit=async()=>{if(!form.summary.trim())return;await addLog(form);setForm({contact:"",channel:"PHONE",summary:"",outcome:""});setShow(false)};
+  const ic={PHONE:"\u{1F4DE}",EMAIL:"\u2709\uFE0F",WEB:"\u{1F310}",IN_PERSON:"\u{1F91D}"};
+  return(
+    <div className="fade" style={{padding:"24px 18px",maxWidth:700,margin:"0 auto"}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
+        <div><h2 style={{fontSize:20,fontWeight:800,color:"#f1f5f9"}}>Logbook</h2><p style={{color:"#6b7280",fontSize:13,marginTop:4}}>Log every call and email. This is your paper trail.</p></div>
+        <Btn onClick={()=>setShow(v=>!v)} style={{fontSize:12,padding:"8px 14px"}}>+ Add</Btn>
+      </div>
+      {show&&(
+        <Card style={{marginBottom:14,borderColor:"rgba(99,102,241,0.3)"}}>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
+            <div><label style={{fontSize:11,color:"#6b7280",display:"block",marginBottom:3}}>Who did you contact?</label><input value={form.contact} onChange={e=>setForm(p=>({...p,contact:e.target.value}))} placeholder="e.g. Orange County Clerk" style={{width:"100%",padding:"7px 10px",borderRadius:7,border:"1px solid rgba(255,255,255,0.1)",background:"rgba(255,255,255,0.04)",color:"#e2e8f0",fontSize:13}}/></div>
+            <div><label style={{fontSize:11,color:"#6b7280",display:"block",marginBottom:3}}>Channel</label><select value={form.channel} onChange={e=>setForm(p=>({...p,channel:e.target.value}))} style={{width:"100%",padding:"7px 10px",borderRadius:7,border:"1px solid rgba(255,255,255,0.1)",background:"#0d0d1a",color:"#e2e8f0",fontSize:13}}>{["PHONE","EMAIL","WEB","IN_PERSON"].map(c=><option key={c}>{c}</option>)}</select></div>
+          </div>
+          <div style={{marginBottom:8}}><label style={{fontSize:11,color:"#6b7280",display:"block",marginBottom:3}}>What happened?</label><textarea value={form.summary} onChange={e=>setForm(p=>({...p,summary:e.target.value}))} placeholder="Dates confirmed, what was said, what was unclear\u2026" style={{width:"100%",padding:"8px 10px",borderRadius:7,border:"1px solid rgba(255,255,255,0.1)",background:"rgba(255,255,255,0.04)",color:"#e2e8f0",fontSize:13,minHeight:64,resize:"vertical"}}/></div>
+          <div style={{marginBottom:10}}><label style={{fontSize:11,color:"#6b7280",display:"block",marginBottom:3}}>Outcome</label><input value={form.outcome} onChange={e=>setForm(p=>({...p,outcome:e.target.value}))} placeholder="e.g. Confirmed forfeiture date / Left voicemail" style={{width:"100%",padding:"7px 10px",borderRadius:7,border:"1px solid rgba(255,255,255,0.1)",background:"rgba(255,255,255,0.04)",color:"#e2e8f0",fontSize:13}}/></div>
+          <div style={{display:"flex",gap:8}}><Btn onClick={submit} style={{fontSize:12}}>Save Entry</Btn><Btn variant="ghost" onClick={()=>setShow(false)} style={{fontSize:12}}>Cancel</Btn></div>
+        </Card>
+      )}
+      {logs.length===0?(
+        <div style={{textAlign:"center",padding:"48px 20px"}}><div style={{fontSize:36,marginBottom:10}}>{"\u{1F4CB}"}</div><div style={{fontSize:15,color:"#6b7280"}}>No entries yet.</div><div style={{fontSize:13,color:"#374151",marginTop:4}}>Every call you log is evidence of your diligence.</div></div>
+      ):logs.map(l=>(
+        <Card key={l.id} style={{marginBottom:8}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+            <div style={{flex:1}}>
+              <div style={{display:"flex",gap:7,alignItems:"center",marginBottom:5,flexWrap:"wrap"}}>
+                <span>{ic[l.channel]||"\u{1F4DD}"}</span>
+                <span style={{fontWeight:700,color:"#e2e8f0",fontSize:14}}>{l.contact||"General"}</span>
+                <Pill label={l.channel} color="#6366f1"/>
+                <div style={{fontSize:11,color:"#374151",marginLeft:"auto"}}>{l.at||l.created_at?fmtDate(l.at||l.created_at):""}</div>
+              </div>
+              <div style={{color:"#94a3b8",fontSize:13,lineHeight:1.6}}>{l.summary}</div>
+              {l.outcome&&<div style={{marginTop:5,fontSize:12,color:"#4ade80"}}>{"\u2713"} {l.outcome}</div>}
+            </div>
+            <button onClick={()=>delLog(l.id)} style={{background:"transparent",border:"none",color:"#374151",cursor:"pointer",fontSize:14,padding:"4px 6px",flexShrink:0}}>{"\u00D7"}</button>
+          </div>
+        </Card>
+      ))}
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   FINANCES
+═══════════════════════════════════════════════════════════════════ */
+function FinancePage({ledger,addLedger,delLedger}){
+  const[show,setShow]=useState(false);
+  const[form,setForm]=useState({type:"OTHER",amount:"",note:""});
+  const add=async()=>{if(!form.amount)return;await addLedger({...form,amount:parseFloat(form.amount)});setForm({type:"OTHER",amount:"",note:""});setShow(false)};
+  const tc={CLAIMED:"#f87171",PREMIUM:"#fbbf24",PAID:"#4ade80",SETTLEMENT_OFFER_RECEIVED:"#818cf8",SETTLEMENT_OFFER_SENT:"#60a5fa",LEGAL_FEES:"#c084fc",RECOVERY_COSTS:"#f97316",OTHER:"#9ca3af"};
+  return(
+    <div className="fade" style={{padding:"24px 18px",maxWidth:700,margin:"0 auto"}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
+        <div><h2 style={{fontSize:20,fontWeight:800,color:"#f1f5f9"}}>Finances</h2><p style={{color:"#6b7280",fontSize:13,marginTop:4}}>Track every number. Sign nothing without knowing court status.</p></div>
+        <Btn onClick={()=>setShow(v=>!v)} style={{fontSize:12,padding:"8px 14px"}}>+ Add</Btn>
+      </div>
+      <Card style={{borderColor:"rgba(251,191,36,0.3)",background:"rgba(251,191,36,0.04)",marginBottom:16}}>
+        <div style={{fontWeight:800,color:"#fcd34d",fontSize:13}}>{"\u26A0"} Do not sign any payment plan or settlement until you confirm Summary Judgment status in each county.</div>
+      </Card>
+      {show&&(
+        <Card style={{marginBottom:14,borderColor:"rgba(99,102,241,0.3)"}}>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
+            <div><label style={{fontSize:11,color:"#6b7280",display:"block",marginBottom:3}}>Type</label><select value={form.type} onChange={e=>setForm(p=>({...p,type:e.target.value}))} style={{width:"100%",padding:"7px 10px",borderRadius:7,border:"1px solid rgba(255,255,255,0.1)",background:"#0d0d1a",color:"#e2e8f0",fontSize:13}}>{["CLAIMED","PREMIUM","PAID","SETTLEMENT_OFFER_RECEIVED","SETTLEMENT_OFFER_SENT","LEGAL_FEES","RECOVERY_COSTS","OTHER"].map(t=><option key={t}>{t}</option>)}</select></div>
+            <div><label style={{fontSize:11,color:"#6b7280",display:"block",marginBottom:3}}>Amount ($)</label><input type="number" value={form.amount} onChange={e=>setForm(p=>({...p,amount:e.target.value}))} style={{width:"100%",padding:"7px 10px",borderRadius:7,border:"1px solid rgba(255,255,255,0.1)",background:"rgba(255,255,255,0.04)",color:"#e2e8f0",fontSize:13}}/></div>
+          </div>
+          <div style={{marginBottom:10}}><label style={{fontSize:11,color:"#6b7280",display:"block",marginBottom:3}}>Source / Notes</label><input value={form.note} onChange={e=>setForm(p=>({...p,note:e.target.value}))} placeholder="Who made this claim? What date?" style={{width:"100%",padding:"7px 10px",borderRadius:7,border:"1px solid rgba(255,255,255,0.1)",background:"rgba(255,255,255,0.04)",color:"#e2e8f0",fontSize:13}}/></div>
+          <div style={{display:"flex",gap:8}}><Btn onClick={add} style={{fontSize:12}}>Save</Btn><Btn variant="ghost" onClick={()=>setShow(false)} style={{fontSize:12}}>Cancel</Btn></div>
+        </Card>
+      )}
+      {ledger.map(e=>(
+        <Card key={e.id} style={{marginBottom:8}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+            <div style={{flex:1}}>
+              <Pill label={e.type} color={tc[e.type]||"#9ca3af"}/>
+              <div style={{color:"#94a3b8",fontSize:13,marginTop:7,lineHeight:1.5}}>{e.note}</div>
+            </div>
+            <div style={{display:"flex",alignItems:"center",gap:8,marginLeft:14}}>
+              <div style={{fontWeight:800,fontSize:17,color:tc[e.type]||"#e2e8f0",flexShrink:0}}>{fmt(e.amount)}</div>
+              <button onClick={()=>delLedger(e.id)} style={{background:"transparent",border:"none",color:"#374151",cursor:"pointer",fontSize:14,padding:"4px"}}>{"\u00D7"}</button>
+            </div>
+          </div>
+        </Card>
+      ))}
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   RENDER
+═══════════════════════════════════════════════════════════════════ */
+ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+</script>
+</body>
+</html>
