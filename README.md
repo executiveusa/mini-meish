@@ -1,119 +1,77 @@
-# Next.js SaaS Starter
+# mini-meish
 
-This is a starter template for building a SaaS application using **Next.js** with support for authentication, Stripe integration for payments, and a dashboard for logged-in users.
+Meish Defense Dashboard with persistent storage and AI assistant.
 
-**Demo: [https://next-saas-start.vercel.app/](https://next-saas-start.vercel.app/)**
+## One-click Deploy
 
-## Features
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/executiveusa/mini-meish&project-name=mini-meish)
 
-- Marketing landing page (`/`) with animated Terminal element
-- Pricing page (`/pricing`) which connects to Stripe Checkout
-- Dashboard pages with CRUD operations on users/teams
-- Basic RBAC with Owner and Member roles
-- Subscription management with Stripe Customer Portal
-- Email/password authentication with JWTs stored to cookies
-- Global middleware to protect logged-in routes
-- Local middleware to protect Server Actions or validate Zod schemas
-- Activity logging system for any user events
+[![Deploy on Railway](https://railway.app/button.svg)](https://railway.app/new/template?template=https://github.com/executiveusa/mini-meish)
 
-## Tech Stack
+## Live Project IDs
 
-- **Framework**: [Next.js](https://nextjs.org/)
-- **Database**: [Postgres](https://www.postgresql.org/)
-- **ORM**: [Drizzle](https://orm.drizzle.team/)
-- **Payments**: [Stripe](https://stripe.com/)
-- **UI Library**: [shadcn/ui](https://ui.shadcn.com/)
+- Vercel Project ID: `prj_PZbKk5mywAPRWy8RIyVbCnbVhFgy`
+- Railway Project ID: `66946c9c-665a-47c0-8aa9-c41e3b9f29e2`
 
-## Getting Started
+## Runtime Modes
 
-```bash
-git clone https://github.com/nextjs/saas-starter
-cd saas-starter
-pnpm install
-```
+- Vercel mode: Uses `api/chat.js` and `api/test.js` serverless functions.
+- Railway/Docker mode: Uses `server.js` to serve `public/` and the same API handlers.
 
-## Running Locally
+## Required Environment Variables
 
-[Install](https://docs.stripe.com/stripe-cli) and log in to your Stripe account:
+For Vercel and Railway:
+
+- `ANTHROPIC_API_KEY`
+- `SUPABASE_URL`
+- `SUPABASE_SERVICE_ROLE_KEY`
+
+Optional:
+
+- `OPENAI_API_KEY`
+
+## Local Docker Run
 
 ```bash
-stripe login
+docker build -t mini-meish .
+docker run --rm -p 3000:3000 \
+	-e ANTHROPIC_API_KEY=your_key \
+	-e SUPABASE_URL=your_supabase_url \
+	-e SUPABASE_SERVICE_ROLE_KEY=your_service_role \
+	mini-meish
 ```
 
-Use the included setup script to create your `.env` file:
+Open `http://localhost:3000`.
+
+## Railway CLI Setup
+
+Install CLI:
 
 ```bash
-pnpm db:setup
+npm install -g @railway/cli
 ```
 
-Run the database migrations and seed the database with a default user and team:
+Authenticate with token:
 
 ```bash
-pnpm db:migrate
-pnpm db:seed
+$env:RAILWAY_TOKEN="<your_token>"
+railway whoami
 ```
 
-This will create the following user and team:
-
-- User: `test@test.com`
-- Password: `admin123`
-
-You can also create new users through the `/sign-up` route.
-
-Finally, run the Next.js development server:
+Link the project:
 
 ```bash
-pnpm dev
+railway link --project 66946c9c-665a-47c0-8aa9-c41e3b9f29e2
 ```
 
-Open [http://localhost:3000](http://localhost:3000) in your browser to see the app in action.
-
-You can listen for Stripe webhooks locally through their CLI to handle subscription change events:
+Deploy:
 
 ```bash
-stripe listen --forward-to localhost:3000/api/stripe/webhook
+railway up
 ```
 
-## Testing Payments
+## Notes
 
-To test Stripe payments, use the following test card details:
-
-- Card Number: `4242 4242 4242 4242`
-- Expiration: Any future date
-- CVC: Any 3-digit number
-
-## Going to Production
-
-When you're ready to deploy your SaaS application to production, follow these steps:
-
-### Set up a production Stripe webhook
-
-1. Go to the Stripe Dashboard and create a new webhook for your production environment.
-2. Set the endpoint URL to your production API route (e.g., `https://yourdomain.com/api/stripe/webhook`).
-3. Select the events you want to listen for (e.g., `checkout.session.completed`, `customer.subscription.updated`).
-
-### Deploy to Vercel
-
-1. Push your code to a GitHub repository.
-2. Connect your repository to [Vercel](https://vercel.com/) and deploy it.
-3. Follow the Vercel deployment process, which will guide you through setting up your project.
-
-### Add environment variables
-
-In your Vercel project settings (or during deployment), add all the necessary environment variables. Make sure to update the values for the production environment, including:
-
-1. `BASE_URL`: Set this to your production domain.
-2. `STRIPE_SECRET_KEY`: Use your Stripe secret key for the production environment.
-3. `STRIPE_WEBHOOK_SECRET`: Use the webhook secret from the production webhook you created in step 1.
-4. `POSTGRES_URL`: Set this to your production database URL.
-5. `AUTH_SECRET`: Set this to a random string. `openssl rand -base64 32` will generate one.
-
-## Other Templates
-
-While this template is intentionally minimal and to be used as a learning resource, there are other paid versions in the community which are more full-featured:
-
-- https://achromatic.dev
-- https://shipfa.st
-- https://makerkit.dev
-- https://zerotoshipped.com
-- https://turbostarter.dev
+- If `railway whoami` returns unauthorized, the token is invalid or lacks access to that project.
+- Health endpoint is available at `/health`.
+- API diagnostics endpoint is available at `/api/test`.

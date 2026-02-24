@@ -3,11 +3,18 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
+    "start": "node server.js",
+    "serve": "node server.js",
     "dev": "wrangler dev",
+    "dev:server": "node server.js",
     "deploy": "wrangler deploy",
     "db:create": "wrangler d1 create meish-defense-db",
     "db:migrate": "wrangler d1 execute meish-defense-db --file=schema.sql",
     "db:migrate:local": "wrangler d1 execute meish-defense-db --local --file=schema.sql"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.21.2"
   },
   "devDependencies": {
     "wrangler": "^3.0.0"
