@@ -44,15 +44,27 @@ textarea,input,select{font-family:inherit;color-scheme:dark}
 const {useState,useEffect,useCallback,useRef} = React;
 
 /* ═══════════════════════════════════════════════════════════════════
-   API — Supabase with localStorage fallback
+  API — Backend (Railway/Vercel) with localStorage fallback
 ═══════════════════════════════════════════════════════════════════ */
-const SUPABASE_URL = 'https://nfhejlqgvghzafrnmpsl.supabase.co';
-const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5maGVqbHFndmdoemFmcm5tcHNsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc4OTg5NTksImV4cCI6MjA4MzQ3NDk1OX0.7klo0es_oBG3IWtpYfBuY0lxRDPGr9-UwZWshzT_M7Y';
-const sb = window.supabase ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
 const IS_FILE = window.location.protocol === 'file:';
+const API_BASE = IS_FILE ? null : '';
 
 function lsGet(k,d){try{const v=localStorage.getItem('mm_'+k);return v?JSON.parse(v):d}catch{return d}}
 function lsSet(k,v){try{localStorage.setItem('mm_'+k,JSON.stringify(v))}catch{}}
+
+async function apiGet(path){
+  if(!API_BASE && API_BASE!=='') return null;
+  try{const r=await fetch(API_BASE+path);if(!r.ok)return null;return await r.json()}catch{return null}
+}
+async function apiPost(path,body){
+  if(!API_BASE && API_BASE!=='') return null;
+  try{const r=await fetch(API_BASE+path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});if(!r.ok)return null;return await r.json()}catch{return null}
+}
+async function apiDel(path,id){
+  if(!API_BASE && API_BASE!=='') return null;
+  const url=id?`${API_BASE+path}?id=${encodeURIComponent(id)}`:API_BASE+path;
+  try{const r=await fetch(url,{method:'DELETE'});if(!r.ok)return null;return await r.json()}catch{return null}
+}
 
 /* ═══════════════════════════════════════════════════════════════════
    STATIC SEED DATA
@@ -214,42 +226,30 @@ function App(){
   useEffect(()=>{
     (async()=>{
       setLoading(true);
-      if(sb && !IS_FILE){
-        try{
-          // Try Supabase first
-          const{data:stateRows}=await sb.from('app_state').select('key,value');
-          if(stateRows){
-            setUseDB(true);
-            const stateData={};
-            for(const r of stateRows){try{stateData[r.key]=JSON.parse(r.value)}catch{stateData[r.key]=r.value}}
-            if(stateData.tasks) setTasksRaw(stateData.tasks);
-            if(stateData.taskChecks) setTaskChecksRaw(stateData.taskChecks);
-            if(stateData.contacts) setContactsRaw(stateData.contacts);
-            if(stateData.bondFacts) setBondFactsRaw(stateData.bondFacts);
-            const{data:logsData}=await sb.from('logs').select('*').order('created_at',{ascending:false});
-            if(logsData) setLogs(logsData);
-            const{data:ledgerData}=await sb.from('ledger').select('*');
-            if(ledgerData&&ledgerData.length>0) setLedger(ledgerData);
-            else{for(const e of LEDGER_SEED){await sb.from('ledger').insert(e)} const{data:f}=await sb.from('ledger').select('*');if(f&&f.length>0)setLedger(f)}
-            const{data:attData}=await sb.from('attorneys').select('*').order('created_at',{ascending:false});
-            if(attData) setAttorneys(attData);
-            setLastSync(new Date());
-          } else throw new Error('no state');
-        }catch(e){
-          console.warn('Supabase load failed, using localStorage:',e);
-          setUseDB(false);
-          const ls=lsGet('state',{});
-          if(ls.tasks) setTasksRaw(ls.tasks);
-          if(ls.taskChecks) setTaskChecksRaw(ls.taskChecks);
-          if(ls.contacts) setContactsRaw(ls.contacts);
-          if(ls.bondFacts) setBondFactsRaw(ls.bondFacts);
-          setLogs(lsGet('logs',[]));
-          setLedger(lsGet('ledger',LEDGER_SEED));
-          setAttorneys(lsGet('attorneys',[]));
+      try{
+        const stateData=await apiGet('/api/state');
+        if(stateData && typeof stateData==='object' && !stateData.error){
+          setUseDB(true);
+          if(stateData.tasks) setTasksRaw(stateData.tasks);
+          if(stateData.taskChecks) setTaskChecksRaw(stateData.taskChecks);
+          if(stateData.contacts) setContactsRaw(stateData.contacts);
+          if(stateData.bondFacts) setBondFactsRaw(stateData.bondFacts);
+          const logsData=await apiGet('/api/logs');
+          if(logsData) setLogs(logsData);
+          const ledgerData=await apiGet('/api/ledger');
+          if(ledgerData&&ledgerData.length>0) setLedger(ledgerData);
+          else{
+            for(const e of LEDGER_SEED) await apiPost('/api/ledger',e);
+            const f=await apiGet('/api/ledger');
+            if(f&&f.length>0)setLedger(f)
+          }
+          const attData=await apiGet('/api/attorneys');
+          if(attData) setAttorneys(attData);
           setLastSync(new Date());
+        } else {
+          throw new Error('api unavailable');
         }
-      } else {
-        // Fallback to localStorage
+      }catch(e){
         setUseDB(false);
         const ls=lsGet('state',{});
         if(ls.tasks) setTasksRaw(ls.tasks);
@@ -260,6 +260,7 @@ function App(){
         setLedger(lsGet('ledger',LEDGER_SEED));
         setAttorneys(lsGet('attorneys',[]));
         setLastSync(new Date());
+        console.warn('API unavailable, using local storage fallback',e);
       }
       setLoading(false);
     })();
@@ -270,10 +271,8 @@ function App(){
     setSyncing(true);
     if(syncTimer.current) clearTimeout(syncTimer.current);
     syncTimer.current=setTimeout(async()=>{
-      if(useDB && sb){
-        for(const[k,v] of Object.entries(patch)){
-          await sb.from('app_state').upsert({key:k,value:JSON.stringify(v),updated_at:new Date().toISOString()});
-        }
+      if(useDB){
+        await apiPost('/api/state',patch);
       } else {
         const cur=lsGet('state',{});
         lsSet('state',{...cur,...patch});
@@ -291,29 +290,29 @@ function App(){
   const addLog=async(entry)=>{
     const id=String(Date.now());
     const full={id,created_at:new Date().toISOString(),...entry};
-    if(useDB && sb) await sb.from('logs').insert(full);
+    if(useDB) await apiPost('/api/logs',full);
     setLogs(p=>{const n=[full,...p];if(!useDB)lsSet('logs',n);return n});
   };
   const delLog=async(id)=>{
-    if(useDB && sb) await sb.from('logs').delete().eq('id',id);
+    if(useDB) await apiDel('/api/logs',id);
     setLogs(p=>{const n=p.filter(l=>l.id!==id);if(!useDB)lsSet('logs',n);return n});
   };
   const addLedger=async(entry)=>{
     const id=String(Date.now());
     const full={id,...entry};
-    if(useDB && sb){await sb.from('ledger').insert(full);const{data:f}=await sb.from('ledger').select('*');if(f)setLedger(f)}
+    if(useDB){await apiPost('/api/ledger',full);const f=await apiGet('/api/ledger');if(f)setLedger(f)}
     else setLedger(p=>{const n=[...p,full];lsSet('ledger',n);return n});
   };
   const delLedger=async(id)=>{
-    if(useDB && sb) await sb.from('ledger').delete().eq('id',id);
+    if(useDB) await apiDel('/api/ledger',id);
     setLedger(p=>{const n=p.filter(l=>l.id!==id);if(!useDB)lsSet('ledger',n);return n});
   };
   const saveAttorney=async(att)=>{
-    if(useDB && sb){await sb.from('attorneys').upsert(att);const{data:f}=await sb.from('attorneys').select('*').order('created_at',{ascending:false});if(f)setAttorneys(f)}
+    if(useDB){await apiPost('/api/attorneys',att);const f=await apiGet('/api/attorneys');if(f)setAttorneys(f)}
     else setAttorneys(p=>{const existing=p.findIndex(a=>a.id===att.id);const n=existing>=0?p.map(a=>a.id===att.id?att:a):[att,...p];lsSet('attorneys',n);return n});
   };
   const delAttorney=async(id)=>{
-    if(useDB && sb) await sb.from('attorneys').delete().eq('id',id);
+    if(useDB) await apiDel('/api/attorneys',id);
     setAttorneys(p=>{const n=p.filter(a=>a.id!==id);if(!useDB)lsSet('attorneys',n);return n});
   };
 
@@ -385,7 +384,7 @@ function App(){
             ))}
             <Divider/>
             <div style={{fontSize:11,color:"#374151",padding:"4px 12px"}}>
-              Storage: {useDB?<span style={{color:"#4ade80"}}>Cloud (Supabase)</span>:<span style={{color:"#fbbf24"}}>Local only</span>}
+              Storage: {useDB?<span style={{color:"#4ade80"}}>Cloud (Railway/Vercel API)</span>:<span style={{color:"#fbbf24"}}>Local only</span>}
             </div>
           </div>
         </div>
@@ -1089,22 +1088,64 @@ function ChatBot(){
   const[input,setInput]=useState('');
   const[loading,setLoading]=useState(false);
   const[loadingHistory,setLoadingHistory]=useState(false);
+  const[autoMode,setAutoMode]=useState(false);
+  const[listening,setListening]=useState(false);
   const bottomRef=useRef(null);
+  const recogRef=useRef(null);
 
-  // Load chat history from Supabase on first open
+  // Load chat history from backend on first open
   useEffect(()=>{
-    if(!open||msgs.length>0||!sb) return;
+    if(!open||msgs.length>0) return;
     (async()=>{
       setLoadingHistory(true);
       try{
-        const{data}=await sb.from('chat_messages').select('role,content,created_at').order('created_at',{ascending:true}).limit(50);
+        const data=await apiGet('/api/chat/history');
         if(data&&data.length>0) setMsgs(data.map(m=>({role:m.role,content:m.content})));
       }catch(e){console.warn('Chat history load failed:',e)}
       setLoadingHistory(false);
     })();
   },[open]);
 
+  useEffect(()=>{
+    if(!autoMode||!open) return;
+    const t=setInterval(async()=>{
+      const res=await apiGet('/api/assistant/tick');
+      if(res&&Array.isArray(res.suggestions)&&res.suggestions.length>0){
+        setMsgs(p=>[...p,{role:'assistant',content:'Proactive update: '+res.suggestions.join(' ')}]);
+      }
+    },60000);
+    return()=>clearInterval(t);
+  },[autoMode,open]);
+
   useEffect(()=>{if(bottomRef.current)bottomRef.current.scrollIntoView({behavior:'smooth'})},[msgs]);
+
+  const speak=(text)=>{
+    if(!('speechSynthesis' in window)) return;
+    const u=new SpeechSynthesisUtterance(text);
+    u.rate=1;
+    u.pitch=1;
+    window.speechSynthesis.cancel();
+    window.speechSynthesis.speak(u);
+  };
+
+  const toggleVoiceInput=()=>{
+    const SpeechRecognition=window.SpeechRecognition||window.webkitSpeechRecognition;
+    if(!SpeechRecognition) return alert('Speech recognition is not supported in this browser.');
+    if(listening&&recogRef.current){recogRef.current.stop();setListening(false);return;}
+    const rec=new SpeechRecognition();
+    recogRef.current=rec;
+    rec.lang='en-US';
+    rec.interimResults=false;
+    rec.maxAlternatives=1;
+    rec.onresult=(ev)=>{
+      const txt=ev.results?.[0]?.[0]?.transcript||'';
+      setInput((p)=>[p,txt].filter(Boolean).join(' ').trim());
+    };
+    rec.onend=()=>setListening(false);
+    rec.onerror=()=>setListening(false);
+    setListening(true);
+    rec.start();
+  };
 
   const send=async()=>{
     const text=input.trim();
@@ -1115,8 +1156,10 @@ function ChatBot(){
     try{
       const r=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:text})});
       const d=await r.json();
-      if(d.reply) setMsgs(p=>[...p,{role:'assistant',content:d.reply}]);
-      else setMsgs(p=>[...p,{role:'assistant',content:'Sorry, I could not process that. Please try again.'}]);
+      if(d.reply){
+        setMsgs(p=>[...p,{role:'assistant',content:d.reply}]);
+        speak(d.reply.slice(0,300));
+      }else setMsgs(p=>[...p,{role:'assistant',content:'Sorry, I could not process that. Please try again.'}]);
     }catch(e){
       setMsgs(p=>[...p,{role:'assistant',content:'Connection error. The AI service may be starting up — please try again in a moment.'}]);
     }
@@ -1141,10 +1184,13 @@ function ChatBot(){
           <span style={{fontSize:18}}>{"\u{1F916}"}</span>
           <div>
             <div style={{fontWeight:700,fontSize:14,color:'#fff'}}>Defense Assistant</div>
-            <div style={{fontSize:10,color:'rgba(255,255,255,0.7)'}}>AI advisor — not legal counsel</div>
+            <div style={{fontSize:10,color:'rgba(255,255,255,0.7)'}}>AI advisor with memory, corrections, and voice</div>
           </div>
         </div>
-        <button onClick={()=>setOpen(false)} style={{background:'rgba(255,255,255,0.15)',border:'none',borderRadius:8,color:'#fff',cursor:'pointer',padding:'4px 10px',fontSize:16}}>{"\u00D7"}</button>
+        <div style={{display:'flex',alignItems:'center',gap:8}}>
+          <button onClick={()=>setAutoMode(v=>!v)} style={{background:autoMode?'rgba(74,222,128,0.2)':'rgba(255,255,255,0.12)',border:'1px solid rgba(255,255,255,0.2)',borderRadius:8,color:'#fff',cursor:'pointer',padding:'4px 8px',fontSize:11}}>Auto {autoMode?'ON':'OFF'}</button>
+          <button onClick={()=>setOpen(false)} style={{background:'rgba(255,255,255,0.15)',border:'none',borderRadius:8,color:'#fff',cursor:'pointer',padding:'4px 10px',fontSize:16}}>{"\u00D7"}</button>
+        </div>
       </div>
       {/* Messages */}
       <div style={{flex:1,overflowY:'auto',padding:'12px 14px',display:'flex',flexDirection:'column',gap:10}}>
@@ -1182,6 +1228,7 @@ function ChatBot(){
       </div>
       {/* Input */}
       <div style={{borderTop:'1px solid rgba(255,255,255,0.08)',padding:'10px 12px',display:'flex',gap:8,flexShrink:0}}>
+        <button onClick={toggleVoiceInput} title="Voice input" style={{background:listening?'rgba(74,222,128,0.25)':'rgba(255,255,255,0.08)',border:'1px solid rgba(255,255,255,0.15)',borderRadius:10,color:'#fff',cursor:'pointer',padding:'0 12px',fontSize:16,flexShrink:0}}>{listening?"\u25CF":"\u{1F3A4}"}</button>
         <textarea value={input} onChange={e=>setInput(e.target.value)} onKeyDown={handleKey} placeholder="Ask about your case..." rows={1}
           style={{flex:1,padding:'9px 12px',borderRadius:10,border:'1px solid rgba(255,255,255,0.1)',background:'rgba(255,255,255,0.04)',color:'#e2e8f0',fontSize:13,resize:'none',minHeight:38,maxHeight:80,outline:'none'}}/>
         <button data-chat-send onClick={send} disabled={loading||!input.trim()}
